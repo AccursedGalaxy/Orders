@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"os"
+	"time"
+)
 
 // Config holds all configuration for the application
 type Config struct {
@@ -11,9 +14,7 @@ type Config struct {
 
 // RedisConfig holds Redis-specific configuration
 type RedisConfig struct {
-	Addr            string
-	Password        string
-	DB              int
+	URL             string
 	RetentionPeriod time.Duration
 	CleanupInterval time.Duration
 	KeyPrefix       string
@@ -36,9 +37,7 @@ type WebSocketConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Redis: RedisConfig{
-			Addr:            "localhost:6379",
-			Password:        "",
-			DB:              0,
+			URL:             getRedisURL(),
 			RetentionPeriod: 24 * time.Hour,
 			CleanupInterval: 1 * time.Hour,
 			KeyPrefix:       "binance:",
@@ -53,4 +52,14 @@ func DefaultConfig() *Config {
 			PingInterval:   5 * time.Second,
 		},
 	}
+}
+
+// getRedisURL returns the Redis URL from environment or default
+func getRedisURL() string {
+	// Heroku Redis sets REDIS_URL environment variable
+	if url := os.Getenv("REDIS_URL"); url != "" {
+		return url
+	}
+	// Fallback to default local Redis
+	return "redis://localhost:6379"
 } 
