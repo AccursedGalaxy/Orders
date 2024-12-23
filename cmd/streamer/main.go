@@ -16,7 +16,10 @@ import (
 func main() {
 	// Load configuration
 	cfg := config.DefaultConfig()
-
+	
+	// Debug: Print Redis configuration
+	log.Printf("Redis Configuration - URL: %s", cfg.Redis.URL)
+	
 	// Create storage
 	store, err := storage.NewRedisStore(cfg)
 	if err != nil {
