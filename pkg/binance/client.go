@@ -166,7 +166,7 @@ func (c *Client) buildStreamURL(symbols []string) string {
 	for _, symbol := range symbols {
 		streams = append(streams, fmt.Sprintf("%s@aggTrade", symbol))
 	}
-	return fmt.Sprintf("wss://stream.binance.com:9443/stream?streams=%s", strings.Join(streams, "/"))
+	return fmt.Sprintf("wss://stream.binance.us:9443/stream?streams=%s", strings.Join(streams, "/"))
 }
 
 func (c *Client) connectAndStream(ctx context.Context, url string) error {
