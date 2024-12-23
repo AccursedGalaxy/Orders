@@ -1,1 +1,1 @@
-worker: bin/streamer 
+web: bin/streamer
