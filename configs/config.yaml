@@ -1,9 +1,0 @@
-log:
-  level: "info"
-  console_log: true
-  file_log: true
-  file_path: "logs/app.log"
-  max_size: 10    # megabytes
-  max_backups: 5  # number of backups
-  max_age: 30     # days
-  compress: true  # compress old files 

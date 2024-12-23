@@ -1,117 +1,76 @@
-# Orders
+# Binance Futures Trade Streamer
 
-## Goal
-Use Binance Websockets To Continuously Stream All Live Aggregate Trades Into A Redis Database.
--> Build in a way where we can quite easily integrate other Live Order Streams If Needed.
+This application streams aggregated trades from Binance USDS-Margined Futures WebSocket and stores them in Redis in real-time.
 
-## System Design
+## Prerequisites
 
-### Architecture Flow
-1. **WebSocket Client**
-   - Connects to Binance WebSocket API
-   - Subscribes to aggregate trade streams (`<symbol>@aggTrade`) for all trading pairs
-   - Handles reconnection and error scenarios
-   - Validates incoming data
-   - Handles 100ms update frequency per symbol
+- Go 1.20 or later
+- Redis server running on localhost:6379
+- Internet connection to access Binance API
 
-2. **Data Processor**
-   - Normalizes trade data into standard format
-   - Handles trade aggregation (100ms window)
-   - Filters out non-market trades (insurance fund trades and ADL trades)
-   - Prepares data for storage
+## Installation
 
-3. **Redis Storage**
-   - Real-time trade storage
-   - Historical aggregations
-   - Performance metrics
+1. Install Go:
+```bash
+# Ubuntu/Debian
+sudo apt install golang-go
 
-### Redis Schema
+# Or download from https://golang.org/dl/
+```
 
-#### 1. Live Trades
-Key pattern and example:
+2. Install Redis:
+```bash
+sudo apt install redis-server
+```
 
-    # Latest trades (sorted set)
-    key: trades:{symbol}:latest
-    value: {
-        "event_type": "aggTrade",
-        "event_time": 123456789,
-        "symbol": "BTCUSDT",
-        "agg_trade_id": "5933014",
-        "price": "0.001",
-        "quantity": "100",
-        "first_trade_id": 100,
-        "last_trade_id": 105,
-        "trade_time": 123456785,
-        "is_buyer_maker": true
-    }
-    score: {trade_time}
+3. Clone the repository and install dependencies:
+```bash
+git clone <repository-url>
+cd binance-redis-streamer
+go mod download
+```
 
-#### 2. Trade Statistics (per symbol)
-Key pattern and example:
+## Usage
 
-    # Hash storing current statistics (100ms aggregation window)
-    key: stats:{symbol}:current
-    fields:
-        last_update_time: 123456789
-        volume: "100.50"
-        trades_count: "150"
-        high_price: "0.002"
-        low_price: "0.001"
-        first_trade_id: "100"
-        last_trade_id: "105"
-        is_buyer_maker_count: "75"  # Number of maker buys in window
+1. Make sure Redis is running:
+```bash
+sudo systemctl start redis
+```
 
-    # Symbol metadata hash
-    key: symbol:{symbol}:info
-    fields:
-        base_asset: "BTC"
-        quote_asset: "USDT"
-        status: "TRADING"
-        last_trade_time: 123456785
+2. Run the application:
+```bash
+go run main.go
+```
 
-## Implementation Details
+The application will:
+- Fetch available symbols from Binance Futures
+- Connect to WebSocket stream for the first 3 symbols (configurable in code)
+- Store trade data in Redis in two formats:
+  - Latest trade data in hash: `binance:aggTrade:<symbol>`
+  - Historical trades in list: `binance:aggTrade:history:<symbol>` (last 1000 trades)
 
-### Data Retention
-- Live trades: 24 hours rolling window
-- Statistics: Keep 100ms, 1m, 5m, 15m, 1h, 4h, 1d aggregations
-- Raw trade data archived to cold storage (optional)
+## Redis Data Structure
 
-### Performance Considerations
-- Use Redis Streams for high-throughput ingestion (100ms updates per symbol)
-- Implement batch processing for statistics updates
-- Use pipelining for multiple Redis operations
-- Consider Redis cluster for scaling
-- Plan for high write throughput due to 100ms update frequency
+1. Latest trade (Hash):
+   - Key: `binance:aggTrade:<symbol>`
+   - Fields:
+     - price: Latest trade price
+     - quantity: Trade quantity
+     - tradeId: Binance trade ID
+     - time: Trade timestamp
 
-### Monitoring
-- WebSocket connection status
-- Trade ingestion rate (expect updates every 100ms per symbol)
-- Redis memory usage
-- Processing latency (critical to handle 100ms updates)
-- Aggregation window accuracy
-- Missing trades detection
+2. Trade history (List):
+   - Key: `binance:aggTrade:history:<symbol>`
+   - Values: Raw JSON messages of last 1000 trades
 
-## Example Data
+## Monitoring
 
-Aggregate Trade Streams Endpoint Response (`<symbol>@aggTrade`):
+You can monitor the stored data using Redis CLI:
 
-    {
-      "e": "aggTrade",  // Event type
-      "E": 123456789,   // Event time
-      "s": "BTCUSDT",   // Symbol
-      "a": 5933014,     // Aggregate trade ID
-      "p": "0.001",     // Price
-      "q": "100",       // Quantity
-      "f": 100,         // First trade ID
-      "l": 105,         // Last trade ID
-      "T": 123456785,   // Trade time
-      "m": true         // Is the buyer the market maker?
-    }
+```bash
+# Get latest trade for a symbol
+redis-cli HGETALL binance:aggTrade:btcusdt
 
-This design provides several advantages:
-
-1. **Scalability**: The schema can handle multiple trading pairs with 100ms updates.
-2. **Accuracy**: Properly handles trade aggregation windows as per Binance specs.
-3. **Performance**: Optimized for high-frequency updates and real-time access.
-4. **Monitoring**: Built-in ways to track system health and data accuracy.
-5. **Historical Data**: Maintains both real-time and historical views of the data.
+# Get last 10 trades from history
+redis-cli LRANGE binance:aggTrade:history:btcusdt 0 9
+```
