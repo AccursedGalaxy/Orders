@@ -34,7 +34,7 @@ func NewClient(cfg *config.Config, store storage.TradeStore) *Client {
 // GetSymbols fetches all available symbols from Binance
 func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
 	log.Println("Fetching symbols from Binance...")
-	url := fmt.Sprintf("%s/fapi/v1/exchangeInfo", c.config.Binance.BaseURL)
+	url := fmt.Sprintf("%s/api/v3/exchangeInfo", c.config.Binance.BaseURL)
 	
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -54,10 +54,13 @@ func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
 
 	var symbols []string
 	for _, sym := range exchangeInfo.Symbols {
-		symbols = append(symbols, strings.ToLower(sym.Symbol))
+		// Only include USDT trading pairs
+		if strings.HasSuffix(sym.Symbol, "USDT") {
+			symbols = append(symbols, strings.ToLower(sym.Symbol))
+		}
 	}
 	
-	log.Printf("Found %d symbols", len(symbols))
+	log.Printf("Found %d USDT trading pairs", len(symbols))
 	return symbols, nil
 }
 
@@ -131,7 +134,7 @@ func (c *Client) buildStreamURL(symbols []string) string {
 	for _, symbol := range symbols {
 		streams = append(streams, fmt.Sprintf("%s@aggTrade", symbol))
 	}
-	return fmt.Sprintf("wss://fstream.binance.com/stream?streams=%s", strings.Join(streams, "/"))
+	return fmt.Sprintf("wss://stream.binance.com:9443/stream?streams=%s", strings.Join(streams, "/"))
 }
 
 func (c *Client) connectAndStream(ctx context.Context, url string) error {
