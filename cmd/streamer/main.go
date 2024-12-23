@@ -17,7 +17,8 @@ func main() {
 	// Load configuration
 	cfg := config.DefaultConfig()
 	
-	// Debug: Print Redis configuration
+	// Debug: Print environment and configuration
+	log.Printf("REDIS_URL environment variable present: %v", os.Getenv("REDIS_URL") != "")
 	log.Printf("Redis Configuration - URL: %s", cfg.Redis.URL)
 	
 	// Create storage
