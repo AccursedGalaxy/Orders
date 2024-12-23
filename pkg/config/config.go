@@ -1,6 +1,7 @@
 package config
 
 import (
+	"log"
 	"os"
 	"time"
 )
@@ -58,8 +59,10 @@ func DefaultConfig() *Config {
 func getRedisURL() string {
 	// Heroku Redis sets REDIS_URL environment variable
 	if url := os.Getenv("REDIS_URL"); url != "" {
+		log.Printf("Using Redis URL from environment: %s", url)
 		return url
 	}
+	log.Printf("Warning: REDIS_URL not found in environment, using default localhost")
 	// Fallback to default local Redis
 	return "redis://localhost:6379"
 } 

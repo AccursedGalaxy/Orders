@@ -32,15 +32,25 @@ type RedisStore struct {
 
 // NewRedisStore creates a new Redis store
 func NewRedisStore(cfg *config.Config) (*RedisStore, error) {
+	if cfg.Redis.URL == "" {
+		return nil, fmt.Errorf("Redis URL is empty")
+	}
+	
+	log.Printf("Attempting to connect to Redis at URL: %s", cfg.Redis.URL)
+	
 	opt, err := redis.ParseURL(cfg.Redis.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
 	}
 
+	log.Printf("Parsed Redis options: addr=%s db=%d", opt.Addr, opt.DB)
+	
 	client := redis.NewClient(opt)
 
-	// Test connection
-	ctx := context.Background()
+	// Test connection with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	
 	if err := client.Ping(ctx).Err(); err != nil {
 		return nil, fmt.Errorf("redis connection error: %w", err)
 	}
