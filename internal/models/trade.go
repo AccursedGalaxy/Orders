@@ -3,6 +3,7 @@ package models
 // Symbol represents a trading symbol
 type Symbol struct {
 	Symbol string `json:"symbol"`
+	Status string `json:"status"`
 }
 
 // ExchangeInfo represents the exchange information response

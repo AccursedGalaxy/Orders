@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -35,6 +36,7 @@ func NewClient(cfg *config.Config, store storage.TradeStore) *Client {
 func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
 	log.Println("Fetching symbols from Binance...")
 	url := fmt.Sprintf("%s/api/v3/exchangeInfo", c.config.Binance.BaseURL)
+	log.Printf("Requesting URL: %s", url)
 	
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -47,17 +49,36 @@ func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
+	// Read and log the response for debugging
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %w", err)
+	}
+	
+	log.Printf("Response status: %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Error response: %s", string(body))
+		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
+	}
+
 	var exchangeInfo models.ExchangeInfo
-	if err := json.NewDecoder(resp.Body).Decode(&exchangeInfo); err != nil {
+	if err := json.Unmarshal(body, &exchangeInfo); err != nil {
+		log.Printf("Response body: %s", string(body))
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
 	var symbols []string
 	for _, sym := range exchangeInfo.Symbols {
-		// Only include USDT trading pairs
-		if strings.HasSuffix(sym.Symbol, "USDT") {
+		// Only include USDT trading pairs that are currently trading
+		if strings.HasSuffix(sym.Symbol, "USDT") && sym.Status == "TRADING" {
 			symbols = append(symbols, strings.ToLower(sym.Symbol))
 		}
+	}
+	
+	if len(symbols) == 0 {
+		log.Printf("Warning: No trading pairs found in response. Total symbols in response: %d", len(exchangeInfo.Symbols))
+		// Don't exit if no symbols found, just return error
+		return nil, fmt.Errorf("no trading pairs found")
 	}
 	
 	log.Printf("Found %d USDT trading pairs", len(symbols))
@@ -68,7 +89,16 @@ func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
 func (c *Client) StreamTrades(ctx context.Context) error {
 	symbols, err := c.GetSymbols(ctx)
 	if err != nil {
-		return fmt.Errorf("failed to get symbols: %w", err)
+		log.Printf("Error getting symbols: %v", err)
+		// Don't return error, try again after delay
+		time.Sleep(c.config.WebSocket.ReconnectDelay)
+		return c.StreamTrades(ctx)
+	}
+
+	if len(symbols) == 0 {
+		log.Println("No symbols to stream, retrying after delay...")
+		time.Sleep(c.config.WebSocket.ReconnectDelay)
+		return c.StreamTrades(ctx)
 	}
 
 	var wg sync.WaitGroup
@@ -103,7 +133,9 @@ func (c *Client) StreamTrades(ctx context.Context) error {
 	select {
 	case err := <-errChan:
 		if err != nil {
-			return fmt.Errorf("streaming error: %w", err)
+			log.Printf("Streaming error: %v, reconnecting...", err)
+			time.Sleep(c.config.WebSocket.ReconnectDelay)
+			return c.StreamTrades(ctx)
 		}
 	case <-ctx.Done():
 		return ctx.Err()
