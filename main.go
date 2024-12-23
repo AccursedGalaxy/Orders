@@ -7,10 +7,16 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 	"github.com/gorilla/websocket"
+)
+
+const (
+	maxStreamsPerConnection = 200  // Binance limit per connection
+	reconnectDelay         = time.Second * 5
 )
 
 type Symbol struct {
@@ -62,6 +68,98 @@ func buildStreamURL(symbols []string) string {
 	return fmt.Sprintf("wss://fstream.binance.com/stream?streams=%s", strings.Join(streams, "/"))
 }
 
+func handleWebSocketConnection(ctx context.Context, symbols []string, rdb *redis.Client, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	streamURL := buildStreamURL(symbols)
+	log.Printf("Connecting to stream URL for %d symbols: %s", len(symbols), streamURL)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			wsConn, resp, err := websocket.DefaultDialer.Dial(streamURL, nil)
+			if err != nil {
+				if resp != nil {
+					log.Printf("WebSocket response status: %s", resp.Status)
+				}
+				log.Printf("WebSocket dial error: %v, retrying in %v...", err, reconnectDelay)
+				time.Sleep(reconnectDelay)
+				continue
+			}
+
+			// Set up ping handler
+			go func() {
+				ticker := time.NewTicker(time.Second * 5)
+				defer ticker.Stop()
+
+				for {
+					select {
+					case <-ctx.Done():
+						return
+					case <-ticker.C:
+						if err := wsConn.WriteMessage(websocket.PingMessage, nil); err != nil {
+							log.Printf("Failed to send ping: %v", err)
+							return
+						}
+					}
+				}
+			}()
+
+			// Process messages
+			for {
+				select {
+				case <-ctx.Done():
+					wsConn.Close()
+					return
+				default:
+					_, message, err := wsConn.ReadMessage()
+					if err != nil {
+						log.Printf("WebSocket read error: %v, reconnecting...", err)
+						wsConn.Close()
+						time.Sleep(reconnectDelay)
+						break
+					}
+
+					var event AggTradeEvent
+					if err := json.Unmarshal(message, &event); err != nil {
+						log.Printf("JSON unmarshal error: %v", err)
+						continue
+					}
+
+					// Store in Redis
+					key := fmt.Sprintf("binance:aggTrade:%s", event.Data.Symbol)
+					err = rdb.HSet(ctx, key, map[string]interface{}{
+						"price":    event.Data.Price,
+						"quantity": event.Data.Quantity,
+						"tradeId":  event.Data.TradeID,
+						"time":     event.Data.EventTime,
+					}).Err()
+
+					if err != nil {
+						log.Printf("Redis store error: %v", err)
+						continue
+					}
+
+					// Store in time-series list
+					listKey := fmt.Sprintf("binance:aggTrade:history:%s", event.Data.Symbol)
+					pipe := rdb.Pipeline()
+					pipe.LPush(ctx, listKey, string(message))
+					pipe.LTrim(ctx, listKey, 0, 999)
+					_, err = pipe.Exec(ctx)
+					if err != nil {
+						log.Printf("Redis pipeline error: %v", err)
+					}
+
+					log.Printf("Processed trade for %s: price=%s, quantity=%s", 
+						event.Data.Symbol, event.Data.Price, event.Data.Quantity)
+				}
+			}
+		}
+	}
+}
+
 func main() {
 	// Get available symbols
 	symbols, err := getSymbols()
@@ -69,33 +167,14 @@ func main() {
 		log.Fatalf("Failed to get symbols: %v", err)
 	}
 
-	// For testing, let's limit to first 3 symbols
-	if len(symbols) > 3 {
-		symbols = symbols[:3]
-	}
-	log.Printf("Selected symbols for streaming: %v", symbols)
-
-	// Build WebSocket URL
-	streamURL := buildStreamURL(symbols)
-	log.Printf("Connecting to stream URL: %s", streamURL)
-
-	// Initialize WebSocket connection
-	wsConn, resp, err := websocket.DefaultDialer.Dial(streamURL, nil)
-	if err != nil {
-		if resp != nil {
-			log.Printf("WebSocket response status: %s", resp.Status)
-		}
-		log.Fatalf("WebSocket dial error: %v", err)
-	}
-	defer wsConn.Close()
-
 	// Initialize Redis client
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     "localhost:6379",
 		Password: "", // set if Redis requires password
 		DB:       0,  // use default DB
 	})
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Test Redis connection
 	_, err = rdb.Ping(ctx).Result()
@@ -104,68 +183,19 @@ func main() {
 	}
 	log.Println("Successfully connected to Redis")
 
-	log.Println("Starting to stream trades...")
-
-	// Set up ping handler
-	go func() {
-		ticker := time.NewTicker(time.Second * 5)
-		defer ticker.Stop()
-
-		for range ticker.C {
-			if err := wsConn.WriteMessage(websocket.PingMessage, nil); err != nil {
-				log.Printf("Failed to send ping: %v", err)
-				return
-			}
-			log.Println("Ping sent to WebSocket server")
-		}
-	}()
-
-	// Main processing loop
-	for {
-		messageType, message, err := wsConn.ReadMessage()
-		if err != nil {
-			log.Printf("WebSocket read error: %v", err)
-			time.Sleep(time.Second)
-			continue
+	// Split symbols into groups for multiple connections
+	var wg sync.WaitGroup
+	for i := 0; i < len(symbols); i += maxStreamsPerConnection {
+		end := i + maxStreamsPerConnection
+		if end > len(symbols) {
+			end = len(symbols)
 		}
 
-		log.Printf("Received message type: %d, length: %d bytes", messageType, len(message))
-
-		// Print raw message for debugging
-		log.Printf("Raw message: %s", string(message))
-
-		var event AggTradeEvent
-		if err := json.Unmarshal(message, &event); err != nil {
-			log.Printf("JSON unmarshal error: %v", err)
-			continue
-		}
-
-		// Store in Redis
-		// Using a hash to store latest trade for each symbol
-		key := fmt.Sprintf("binance:aggTrade:%s", event.Data.Symbol)
-		err = rdb.HSet(ctx, key, map[string]interface{}{
-			"price":    event.Data.Price,
-			"quantity": event.Data.Quantity,
-			"tradeId":  event.Data.TradeID,
-			"time":     event.Data.EventTime,
-		}).Err()
-
-		if err != nil {
-			log.Printf("Redis store error: %v", err)
-			continue
-		}
-
-		// Also store in a time-series list (limited to last 1000 trades per symbol)
-		listKey := fmt.Sprintf("binance:aggTrade:history:%s", event.Data.Symbol)
-		pipe := rdb.Pipeline()
-		pipe.LPush(ctx, listKey, string(message))
-		pipe.LTrim(ctx, listKey, 0, 999) // Keep only last 1000 trades
-		_, err = pipe.Exec(ctx)
-		if err != nil {
-			log.Printf("Redis pipeline error: %v", err)
-		}
-
-		log.Printf("Successfully processed trade for %s: price=%s, quantity=%s", 
-			event.Data.Symbol, event.Data.Price, event.Data.Quantity)
+		symbolGroup := symbols[i:end]
+		wg.Add(1)
+		go handleWebSocketConnection(ctx, symbolGroup, rdb, &wg)
 	}
+
+	log.Printf("Started streaming trades for all %d symbols", len(symbols))
+	wg.Wait()
 } 
