@@ -9,6 +9,7 @@ import (
 
 	"binance-redis-streamer/pkg/binance"
 	"binance-redis-streamer/pkg/config"
+	"binance-redis-streamer/pkg/metrics"
 	"binance-redis-streamer/pkg/storage"
 )
 
@@ -23,12 +24,18 @@ func main() {
 	}
 	defer store.Close()
 
+	// Create metrics exporter
+	exporter := metrics.NewMetricsExporter(cfg, store.GetRedisClient())
+
 	// Create Binance client
 	client := binance.NewClient(cfg, store)
 
 	// Set up context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// Start metrics collection
+	go exporter.Start(ctx)
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
