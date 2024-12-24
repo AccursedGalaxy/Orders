@@ -92,24 +92,6 @@ go build -o bin/streamer cmd/streamer/main.go
 ./bin/streamer
 ```
 
-## 📊 Data Viewer Utility
-
-The project includes a powerful Redis data viewer utility for monitoring and debugging:
-
-```bash
-# View all stored keys
-go run scripts/redis-viewer.go --cmd list
-
-# List available trading pairs
-go run scripts/redis-viewer.go --cmd symbols
-
-# Get latest trade for a symbol
-go run scripts/redis-viewer.go --cmd latest --symbol btcusdt
-
-# View trade history
-go run scripts/redis-viewer.go --cmd history --symbol btcusdt
-```
-
 ## 📁 Project Structure
 
 ```
@@ -165,10 +147,10 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-For support and questions, please [open an issue](https://github.com/yourusername/binance-redis-streamer/issues) or contact the maintainers.
+For support and questions, please [open an issue](https://github.com/AccursedGalaxy/Orders/issues) or contact the maintainers.
 
 ---
 
 <div align="center">
-Made with ❤️ by [Your Name/Organization]
+Made with ❤️ by Accursed Galaxy
 </div>
