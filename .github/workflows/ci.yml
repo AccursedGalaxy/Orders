@@ -11,10 +11,10 @@ on:
 jobs:
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     services:
       redis:
-        image: redis
+        image: redis:latest
         ports:
           - 6379:6379
         options: >-
@@ -24,12 +24,14 @@ jobs:
           --health-retries 5
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: '1.21'
+        check-latest: true
+        cache: true
 
     - name: Install dependencies
       run: go mod download
@@ -43,16 +45,18 @@ jobs:
   build:
     name: Build
     needs: test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
         go-version: '1.21'
+        check-latest: true
+        cache: true
 
     - name: Get version
       id: get_version
@@ -61,34 +65,39 @@ jobs:
     - name: Build
       run: |
         mkdir -p bin
-        GOOS=linux GOARCH=amd64 go build -v -o bin/streamer-linux-amd64 cmd/streamer/main.go
-        GOOS=linux GOARCH=amd64 go build -v -o bin/redis-viewer-linux-amd64 scripts/redis-viewer.go
-        GOOS=darwin GOARCH=amd64 go build -v -o bin/streamer-darwin-amd64 cmd/streamer/main.go
-        GOOS=darwin GOARCH=amd64 go build -v -o bin/redis-viewer-darwin-amd64 scripts/redis-viewer.go
+        GOOS=linux GOARCH=amd64 go build -v -ldflags="-X main.Version=$(cat version.txt)" -o bin/streamer-linux-amd64 cmd/streamer/main.go
+        GOOS=linux GOARCH=amd64 go build -v -ldflags="-X main.Version=$(cat version.txt)" -o bin/redis-viewer-linux-amd64 scripts/redis-viewer.go
+        GOOS=darwin GOARCH=amd64 go build -v -ldflags="-X main.Version=$(cat version.txt)" -o bin/streamer-darwin-amd64 cmd/streamer/main.go
+        GOOS=darwin GOARCH=amd64 go build -v -ldflags="-X main.Version=$(cat version.txt)" -o bin/redis-viewer-darwin-amd64 scripts/redis-viewer.go
         tar czf bin/binance-redis-streamer-linux-amd64.tar.gz -C bin streamer-linux-amd64 redis-viewer-linux-amd64
         tar czf bin/binance-redis-streamer-darwin-amd64.tar.gz -C bin streamer-darwin-amd64 redis-viewer-darwin-amd64
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: binaries
         path: bin/
+        retention-days: 5
 
   release:
     name: Create Release
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
 
     - name: Get version
       id: get_version
       run: echo "VERSION=$(cat version.txt)" >> $GITHUB_OUTPUT
 
     - name: Download artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: binaries
         path: bin
@@ -107,7 +116,7 @@ jobs:
         echo "EOF" >> $GITHUB_OUTPUT
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v2
       with:
         name: Release ${{ steps.get_version.outputs.VERSION }}
         body: ${{ steps.changelog.outputs.CHANGELOG }}
