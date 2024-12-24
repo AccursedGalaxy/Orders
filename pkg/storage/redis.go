@@ -16,6 +16,16 @@ import (
 	"binance-redis-streamer/pkg/config"
 )
 
+// TradeStore defines the interface for trade storage
+type TradeStore interface {
+	StoreTrade(ctx context.Context, trade *models.Trade) error
+	StoreRawTrade(ctx context.Context, symbol string, data []byte) error
+	GetTradeHistory(ctx context.Context, symbol string, start, end time.Time) ([]models.AggTradeEvent, error)
+	GetLatestTrade(ctx context.Context, symbol string) (*models.Trade, error)
+	GetRedisClient() *redis.Client
+	Close() error
+}
+
 // RedisStore handles Redis storage operations
 type RedisStore struct {
 	client *redis.Client
