@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,9 +36,82 @@ func NewClient(cfg *config.Config, store storage.TradeStore) *Client {
 // GetSymbols fetches all available symbols from Binance
 func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
 	log.Println("Fetching symbols from Binance...")
-	url := fmt.Sprintf("%s/api/v3/exchangeInfo", c.config.Binance.BaseURL)
-	log.Printf("Requesting URL: %s", url)
 	
+	// If main symbols are configured and no additional symbols are allowed
+	if len(c.config.Binance.MainSymbols) > 0 && c.config.Binance.MaxSymbols <= len(c.config.Binance.MainSymbols) {
+		symbols := make([]string, len(c.config.Binance.MainSymbols))
+		for i, s := range c.config.Binance.MainSymbols {
+			symbols[i] = strings.ToLower(s)
+		}
+		log.Printf("Using configured main symbols only: %v", symbols)
+		return symbols, nil
+	}
+
+	// First get exchange info
+	url := fmt.Sprintf("%s/api/v3/exchangeInfo", c.config.Binance.BaseURL)
+	exchangeInfo, err := c.fetchExchangeInfo(ctx, url)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get 24hr ticker data if volume filtering is enabled
+	var volumeData map[string]float64
+	if c.config.Binance.MinDailyVolume > 0 {
+		volumeData, err = c.fetch24hVolume(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch volume data: %w", err)
+		}
+	}
+
+	// First, add main symbols
+	symbolMap := make(map[string]bool)
+	for _, s := range c.config.Binance.MainSymbols {
+		symbolMap[strings.ToLower(s)] = true
+	}
+
+	// Then add additional symbols up to MaxSymbols
+	remainingSlots := c.config.Binance.MaxSymbols - len(symbolMap)
+	if remainingSlots > 0 {
+		for _, sym := range exchangeInfo.Symbols {
+			symbol := strings.ToLower(sym.Symbol)
+			// Skip if already added or not a USDT pair or not trading
+			if symbolMap[symbol] || !strings.HasSuffix(symbol, "usdt") || sym.Status != "TRADING" {
+				continue
+			}
+
+			// Check volume if filtering is enabled
+			if c.config.Binance.MinDailyVolume > 0 {
+				volume, exists := volumeData[symbol]
+				if !exists || volume < c.config.Binance.MinDailyVolume {
+					continue
+				}
+			}
+
+			// Add symbol if we haven't reached the limit
+			if len(symbolMap) < c.config.Binance.MaxSymbols {
+				symbolMap[symbol] = true
+			} else {
+				break
+			}
+		}
+	}
+
+	// Convert map to slice
+	symbols := make([]string, 0, len(symbolMap))
+	for symbol := range symbolMap {
+		symbols = append(symbols, symbol)
+	}
+
+	if len(symbols) == 0 {
+		return nil, fmt.Errorf("no trading pairs found")
+	}
+	
+	log.Printf("Selected %d trading pairs", len(symbols))
+	return symbols, nil
+}
+
+// fetchExchangeInfo fetches exchange information from Binance
+func (c *Client) fetchExchangeInfo(ctx context.Context, url string) (*models.ExchangeInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -49,40 +123,58 @@ func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
-	// Read and log the response for debugging
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
 	
-	log.Printf("Response status: %d", resp.StatusCode)
 	if resp.StatusCode != http.StatusOK {
-		log.Printf("Error response: %s", string(body))
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
 	var exchangeInfo models.ExchangeInfo
 	if err := json.Unmarshal(body, &exchangeInfo); err != nil {
-		log.Printf("Response body: %s", string(body))
 		return nil, fmt.Errorf("failed to decode response: %w", err)
 	}
 
-	var symbols []string
-	for _, sym := range exchangeInfo.Symbols {
-		// Only include USDT trading pairs that are currently trading
-		if strings.HasSuffix(sym.Symbol, "USDT") && sym.Status == "TRADING" {
-			symbols = append(symbols, strings.ToLower(sym.Symbol))
+	return &exchangeInfo, nil
+}
+
+// fetch24hVolume fetches 24h volume data for all symbols
+func (c *Client) fetch24hVolume(ctx context.Context) (map[string]float64, error) {
+	url := fmt.Sprintf("%s/api/v3/ticker/24hr", c.config.Binance.BaseURL)
+	
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch volume data: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var tickers []struct {
+		Symbol        string `json:"symbol"`
+		QuoteVolume   string `json:"quoteVolume"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&tickers); err != nil {
+		return nil, fmt.Errorf("failed to decode volume data: %w", err)
+	}
+
+	volumeData := make(map[string]float64)
+	for _, ticker := range tickers {
+		volume, err := strconv.ParseFloat(ticker.QuoteVolume, 64)
+		if err != nil {
+			log.Printf("Warning: invalid volume for %s: %s", ticker.Symbol, ticker.QuoteVolume)
+			continue
 		}
+		volumeData[strings.ToLower(ticker.Symbol)] = volume
 	}
-	
-	if len(symbols) == 0 {
-		log.Printf("Warning: No trading pairs found in response. Total symbols in response: %d", len(exchangeInfo.Symbols))
-		// Don't exit if no symbols found, just return error
-		return nil, fmt.Errorf("no trading pairs found")
-	}
-	
-	log.Printf("Found %d USDT trading pairs", len(symbols))
-	return symbols, nil
+
+	return volumeData, nil
 }
 
 // StreamTrades starts streaming trades for the given symbols

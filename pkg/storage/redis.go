@@ -1,9 +1,12 @@
 package storage
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"time"
 
@@ -74,14 +77,50 @@ func NewRedisStore(cfg *config.Config) (*RedisStore, error) {
 	return store, nil
 }
 
+// compressData compresses data using gzip
+func (s *RedisStore) compressData(data []byte) ([]byte, error) {
+	if !s.config.Redis.UseCompression {
+		return data, nil
+	}
+	var buf bytes.Buffer
+	gz := gzip.NewWriter(&buf)
+	if _, err := gz.Write(data); err != nil {
+		return nil, err
+	}
+	if err := gz.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// decompressData decompresses gzipped data
+func (s *RedisStore) decompressData(data []byte) ([]byte, error) {
+	if !s.config.Redis.UseCompression {
+		return data, nil
+	}
+	gz, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	defer gz.Close()
+	return io.ReadAll(gz)
+}
+
 // StoreTrade stores a trade in Redis with expiration
 func (s *RedisStore) StoreTrade(ctx context.Context, trade *models.Trade) error {
 	key := fmt.Sprintf("%saggTrade:%s:latest", s.config.Redis.KeyPrefix, trade.Symbol)
 	
-	// Convert trade to JSON for consistent storage
+	// Convert trade to JSON
 	tradeJSON, err := json.Marshal(trade)
 	if err != nil {
 		return fmt.Errorf("failed to marshal trade: %w", err)
+	}
+
+	// Compress if enabled
+	if compressed, err := s.compressData(tradeJSON); err == nil {
+		tradeJSON = compressed
+	} else {
+		log.Printf("Warning: compression failed: %v", err)
 	}
 
 	pipe := s.client.Pipeline()
@@ -95,12 +134,7 @@ func (s *RedisStore) StoreTrade(ctx context.Context, trade *models.Trade) error 
 	pipe.Expire(ctx, symbolsKey, s.config.Redis.RetentionPeriod)
 
 	_, err = pipe.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to store trade: %w", err)
-	}
-
-	log.Printf("Stored latest trade for %s in Redis", trade.Symbol)
-	return nil
+	return err
 }
 
 // StoreRawTrade stores the raw trade data in a sorted set with timestamp
@@ -108,6 +142,13 @@ func (s *RedisStore) StoreRawTrade(ctx context.Context, symbol string, data []by
 	timestamp := time.Now().UnixNano()
 	historyKey := fmt.Sprintf("%saggTrade:%s:history", s.config.Redis.KeyPrefix, symbol)
 	
+	// Compress if enabled
+	if compressed, err := s.compressData(data); err == nil {
+		data = compressed
+	} else {
+		log.Printf("Warning: compression failed: %v", err)
+	}
+
 	pipe := s.client.Pipeline()
 
 	// Store trade data in a sorted set with timestamp as score
@@ -119,16 +160,17 @@ func (s *RedisStore) StoreRawTrade(ctx context.Context, symbol string, data []by
 	// Set expiration for the sorted set
 	pipe.Expire(ctx, historyKey, s.config.Redis.RetentionPeriod)
 
-	// Trim old data to maintain a reasonable size
+	// Trim to maintain size limit
+	if s.config.Redis.MaxTradesPerKey > 0 {
+		pipe.ZRemRangeByRank(ctx, historyKey, 0, int64(-(s.config.Redis.MaxTradesPerKey + 1)))
+	}
+
+	// Remove old data
 	cutoff := float64(time.Now().Add(-s.config.Redis.RetentionPeriod).UnixNano())
 	pipe.ZRemRangeByScore(ctx, historyKey, "-inf", fmt.Sprintf("%f", cutoff))
 
 	_, err := pipe.Exec(ctx)
-	if err != nil {
-		return fmt.Errorf("failed to store raw trade: %w", err)
-	}
-
-	return nil
+	return err
 }
 
 // GetLatestTrade retrieves the latest trade for a symbol
@@ -155,7 +197,6 @@ func (s *RedisStore) GetLatestTrade(ctx context.Context, symbol string) (*models
 func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, end time.Time) ([]models.AggTradeEvent, error) {
 	historyKey := fmt.Sprintf("%saggTrade:%s:history", s.config.Redis.KeyPrefix, symbol)
 	
-	// Get trades within the time range
 	trades, err := s.client.ZRangeByScore(ctx, historyKey, &redis.ZRangeBy{
 		Min: fmt.Sprintf("%d", start.UnixNano()),
 		Max: fmt.Sprintf("%d", end.UnixNano()),
@@ -167,8 +208,17 @@ func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, 
 
 	var events []models.AggTradeEvent
 	for _, tradeData := range trades {
+		// Decompress if needed
+		data := []byte(tradeData)
+		if decompressed, err := s.decompressData(data); err == nil {
+			data = decompressed
+		} else {
+			log.Printf("Warning: decompression failed: %v", err)
+			continue
+		}
+
 		var event models.AggTradeEvent
-		if err := json.Unmarshal([]byte(tradeData), &event); err != nil {
+		if err := json.Unmarshal(data, &event); err != nil {
 			log.Printf("Warning: failed to unmarshal trade data: %v", err)
 			continue
 		}

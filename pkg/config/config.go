@@ -19,6 +19,9 @@ type RedisConfig struct {
 	RetentionPeriod time.Duration
 	CleanupInterval time.Duration
 	KeyPrefix       string
+	// New fields for optimization
+	UseCompression  bool
+	MaxTradesPerKey int // Limit number of trades stored per symbol
 }
 
 // BinanceConfig holds Binance-specific configuration
@@ -26,6 +29,10 @@ type BinanceConfig struct {
 	BaseURL            string
 	MaxStreamsPerConn  int
 	HistorySize        int64
+	// New fields for symbol filtering
+	MainSymbols        []string // Priority symbols to track (e.g., ["BTCUSDT", "ETHUSDT"])
+	MaxSymbols         int      // Maximum number of symbols to track (0 for unlimited)
+	MinDailyVolume     float64  // Minimum 24h volume to track a symbol (0 for unlimited)
 }
 
 // WebSocketConfig holds WebSocket-specific configuration
@@ -42,11 +49,16 @@ func DefaultConfig() *Config {
 			RetentionPeriod: 24 * time.Hour,
 			CleanupInterval: 1 * time.Hour,
 			KeyPrefix:       "binance:",
+			UseCompression:  true,
+			MaxTradesPerKey: 100000, // Limit history per symbol
 		},
 		Binance: BinanceConfig{
-			BaseURL:            "https://api.binance.com",
-			MaxStreamsPerConn:  200,
-			HistorySize:        1000,
+			BaseURL:           "https://api.binance.com",
+			MaxStreamsPerConn: 200,
+			HistorySize:       10000,
+			MainSymbols:       []string{"BTCUSDT", "ETHUSDT", "BNBUSDT"},
+			MaxSymbols:        5,                                                     // Limit total symbols
+			MinDailyVolume:    1000000.0,                                             // $1M daily volume minimum
 		},
 		WebSocket: WebSocketConfig{
 			ReconnectDelay: 5 * time.Second,
