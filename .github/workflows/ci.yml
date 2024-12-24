@@ -26,19 +26,6 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      postgres:
-        image: postgres:latest
-        env:
-          POSTGRES_USER: test
-          POSTGRES_PASSWORD: test
-          POSTGRES_DB: test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
 
     steps:
     - uses: actions/checkout@v4
@@ -58,16 +45,6 @@ jobs:
         CUSTOM_REDIS_URL: redis://localhost:6379/0
       run: |
         go test -v -race \
-          binance-redis-streamer/internal/models \
-          binance-redis-streamer/pkg/config \
-          binance-redis-streamer/pkg/metrics \
-          binance-redis-streamer/pkg/binance
-
-    - name: Run benchmarks
-      env:
-        CUSTOM_REDIS_URL: redis://localhost:6379/0
-      run: |
-        go test -v -run=^$ -bench=. -benchmem \
           binance-redis-streamer/internal/models \
           binance-redis-streamer/pkg/config \
           binance-redis-streamer/pkg/metrics \

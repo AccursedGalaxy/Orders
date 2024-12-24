@@ -19,28 +19,32 @@ import (
 	"binance-redis-streamer/pkg/storage"
 )
 
-// Client represents a Binance client
+// Client represents a Binance WebSocket client
 type Client struct {
-	config *config.Config
-	store  storage.TradeStore
-	isTest bool // Added for test mode
+	config     *config.Config
+	store      storage.TradeStore
+	baseURL    string
+	wsConn     *websocket.Conn
+	mu         sync.RWMutex
+	isTest     bool
 }
 
 // NewClient creates a new Binance client
 func NewClient(cfg *config.Config, store storage.TradeStore) *Client {
 	return &Client{
-		config: cfg,
-		store:  store,
-		isTest: false,
+		config:  cfg,
+		store:   store,
+		baseURL: cfg.Binance.BaseURL,
 	}
 }
 
 // NewTestClient creates a new Binance client for testing
 func NewTestClient(cfg *config.Config, store storage.TradeStore) *Client {
 	return &Client{
-		config: cfg,
-		store:  store,
-		isTest: true,
+		config:  cfg,
+		store:   store,
+		baseURL: cfg.Binance.BaseURL,
+		isTest:  true,
 	}
 }
 

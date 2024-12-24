@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -87,16 +88,40 @@ func (m *mockStore) Close() error {
 }
 
 func BenchmarkGetSymbols(b *testing.B) {
-	server, cfg := setupTestServer()
-	defer server.Close()
+	cfg := config.DefaultConfig()
+	cfg.Redis.URL = "redis://localhost:6379/0"
 
-	client := NewClient(cfg, &mockStore{})
-	ctx := context.Background()
+	store := &mockStore{}
+	client := NewClient(cfg, store)
+
+	// Setup mock HTTP server
+	mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/api/v3/ticker/24hr") {
+			// Mock 24hr ticker response
+			w.Write([]byte(`[
+				{"symbol":"BTCUSDT","quoteVolume":"1000000.00"},
+				{"symbol":"ETHUSDT","quoteVolume":"500000.00"}
+			]`))
+			return
+		}
+		// Mock exchange info response
+		w.Write([]byte(`{
+			"symbols": [
+				{"symbol":"BTCUSDT","status":"TRADING"},
+				{"symbol":"ETHUSDT","status":"TRADING"},
+				{"symbol":"BNBUSDT","status":"TRADING"}
+			]
+		}`))
+	}))
+	defer mockServer.Close()
+
+	// Override base URL to use mock server
+	client.baseURL = mockServer.URL
 
 	b.ResetTimer()
 	b.Run("GetSymbols", func(b *testing.B) {
 		for i := 0; i < b.N; i++ {
-			_, err := client.GetSymbols(ctx)
+			_, err := client.GetSymbols(context.Background())
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -106,28 +131,18 @@ func BenchmarkGetSymbols(b *testing.B) {
 
 func BenchmarkProcessMessage(b *testing.B) {
 	cfg := config.DefaultConfig()
-	client := NewTestClient(cfg, newMockStore())
-	ctx := context.Background()
+	cfg.Redis.URL = "redis://localhost:6379/0"
 
-	message := []byte(`{
-		"stream": "btcusdt@aggTrade",
-		"data": {
-			"e": "aggTrade",
-			"E": 1625232862,
-			"s": "BTCUSDT",
-			"p": "50000.00",
-			"q": "1.5",
-			"f": 100,
-			"l": 200,
-			"T": 1625232862,
-			"m": true
-		}
-	}`)
+	store := &mockStore{}
+	client := NewClient(cfg, store)
+
+	msg := []byte(`{"stream":"btcusdt@aggTrade","data":{"e":"aggTrade","E":1625232862,"s":"BTCUSDT","p":"50000.00","q":"1.5"}}`)
 
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			if err := client.processMessage(ctx, message); err != nil {
+			err := client.processMessage(context.Background(), msg)
+			if err != nil {
 				b.Fatal(err)
 			}
 		}
