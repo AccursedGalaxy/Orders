@@ -84,19 +84,19 @@ jobs:
       run: |
         PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
         if [ -z "$PREVIOUS_TAG" ]; then
-          git log --pretty=format:"* %s" > CHANGELOG.md
+          CHANGELOG=$(git log --pretty=format:"* %s")
         else
-          git log --pretty=format:"* %s" $PREVIOUS_TAG..HEAD > CHANGELOG.md
+          CHANGELOG=$(git log --pretty=format:"* %s" $PREVIOUS_TAG..HEAD)
         fi
-        echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
-        cat CHANGELOG.md >> $GITHUB_OUTPUT
-        echo "EOF" >> $GITHUB_OUTPUT
+        echo "changelog<<CHANGELOGEOF" >> $GITHUB_OUTPUT
+        echo "$CHANGELOG" >> $GITHUB_OUTPUT
+        echo "CHANGELOGEOF" >> $GITHUB_OUTPUT
 
     - name: Create Release
       uses: softprops/action-gh-release@v2
       with:
         name: Release ${{ steps.get_version.outputs.VERSION }}
-        body: ${{ steps.changelog.outputs.CHANGELOG }}
+        body: ${{ steps.changelog.outputs.changelog }}
         files: |
           bin/binance-redis-streamer-linux-amd64.tar.gz
           bin/binance-redis-streamer-darwin-amd64.tar.gz
