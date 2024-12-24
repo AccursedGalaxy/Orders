@@ -69,46 +69,49 @@ type Candle struct {
 	TradeCount  int64
 }
 
-// NewCandle creates a new candle from a trade
-func NewCandle(trade *Trade) *Candle {
+// NewCandle creates a new candle for a given timestamp
+func NewCandle(timestamp time.Time) *Candle {
 	return &Candle{
-		Timestamp:   time.Unix(0, trade.Time),
-		OpenPrice:   trade.Price,
-		HighPrice:   trade.Price,
-		LowPrice:    trade.Price,
-		ClosePrice:  trade.Price,
-		Volume:      trade.Quantity,
-		TradeCount:  1,
+		Timestamp:   timestamp,
+		OpenPrice:   "",
+		HighPrice:   "",
+		LowPrice:    "",
+		ClosePrice:  "",
+		Volume:      "0",
+		TradeCount:  0,
 	}
 }
 
-// UpdateCandle updates a candle with new trade data
-func (c *Candle) UpdateCandle(trade *Trade) {
-	price, _ := strconv.ParseFloat(trade.Price, 64)
-	high, _ := strconv.ParseFloat(c.HighPrice, 64)
-	low, _ := strconv.ParseFloat(c.LowPrice, 64)
-	volume, _ := strconv.ParseFloat(trade.Quantity, 64)
-	existingVolume, _ := strconv.ParseFloat(c.Volume, 64)
-
-	if price > high {
+// UpdateFromTrade updates the candle with data from a new trade
+func (c *Candle) UpdateFromTrade(trade *Trade) {
+	if c.OpenPrice == "" {
+		c.OpenPrice = trade.Price
+	}
+	if c.HighPrice == "" || trade.Price > c.HighPrice {
 		c.HighPrice = trade.Price
 	}
-	if price < low {
+	if c.LowPrice == "" || trade.Price < c.LowPrice {
 		c.LowPrice = trade.Price
 	}
 	c.ClosePrice = trade.Price
-	c.Volume = strconv.FormatFloat(volume + existingVolume, 'f', 8, 64)
+
+	// Update volume
+	currentVolume, _ := strconv.ParseFloat(c.Volume, 64)
+	tradeVolume, _ := strconv.ParseFloat(trade.Quantity, 64)
+	newVolume := currentVolume + tradeVolume
+	c.Volume = strconv.FormatFloat(newVolume, 'f', -1, 64)
+
 	c.TradeCount++
 }
 
 // ToTrade converts TradeData to Trade
 func (td *TradeData) ToTrade() *Trade {
 	return &Trade{
-		Symbol:    td.Symbol,
-		Price:     td.Price,
-		Quantity:  td.Quantity,
-		TradeID:   td.TradeID,
-		Time:      td.TradeTime,
-		EventTime: td.EventTime,
+			Symbol:    td.Symbol,
+			Price:     td.Price,
+			Quantity:  td.Quantity,
+			TradeID:   td.TradeID,
+			Time:      td.TradeTime,
+			EventTime: td.EventTime,
 	}
 } 

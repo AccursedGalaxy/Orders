@@ -5,162 +5,102 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
-	"strconv"
-	"sync"
 	"time"
 
 	"github.com/go-redis/redis/v8"
 
+	"binance-redis-streamer/internal/models"
 	"binance-redis-streamer/pkg/config"
 )
 
-// TradeMetrics holds aggregated trade metrics
-type TradeMetrics struct {
-	Symbol        string
-	Price         float64
-	Volume24h     float64
-	TradeCount24h int64
-	LastUpdate    time.Time
-	HighPrice24h  float64
-	LowPrice24h   float64
+// Metrics represents collected metrics
+type Metrics struct {
+	Prices map[string]string // Symbol -> Price mapping
 }
 
-// MetricsExporter handles metrics calculation and export
+// MetricsExporter handles metrics collection and export
 type MetricsExporter struct {
-	redis  *redis.Client
 	config *config.Config
+	client *redis.Client
 	stopCh chan struct{}
-	mutex  sync.RWMutex
-	metrics map[string]*TradeMetrics
 }
 
 // NewMetricsExporter creates a new metrics exporter
-func NewMetricsExporter(cfg *config.Config, redisClient *redis.Client) *MetricsExporter {
+func NewMetricsExporter(cfg *config.Config, client *redis.Client) *MetricsExporter {
 	return &MetricsExporter{
-		redis:   redisClient,
-		config:  cfg,
-		stopCh:  make(chan struct{}),
-		metrics: make(map[string]*TradeMetrics),
+		config: cfg,
+		client: client,
+		stopCh: make(chan struct{}),
 	}
 }
 
-// Start begins metrics collection
-func (m *MetricsExporter) Start(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
+// Start starts metrics collection
+func (e *MetricsExporter) Start(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
-
-	// Initial collection
-	m.collectMetrics(ctx)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-e.stopCh:
+			return
 		case <-ticker.C:
-			m.collectMetrics(ctx)
+			metrics, err := e.CollectMetrics(ctx)
+			if err != nil {
+				log.Printf("Error collecting metrics: %v", err)
+				continue
+			}
+			e.exportMetrics(metrics)
 		}
 	}
 }
 
-// collectMetrics gathers metrics from Redis
-func (m *MetricsExporter) collectMetrics(ctx context.Context) {
+// Stop stops the metrics collection
+func (e *MetricsExporter) Stop() {
+	close(e.stopCh)
+}
+
+// CollectMetrics collects current metrics from Redis
+func (e *MetricsExporter) CollectMetrics(ctx context.Context) (*Metrics, error) {
+	metrics := &Metrics{
+		Prices: make(map[string]string),
+	}
+
 	// Get all symbols
-	symbolsKey := fmt.Sprintf("%ssymbols", m.config.Redis.KeyPrefix)
-	symbols, err := m.redis.SMembers(ctx, symbolsKey).Result()
+	symbolsKey := fmt.Sprintf("%ssymbols", e.config.Redis.KeyPrefix)
+	symbols, err := e.client.SMembers(ctx, symbolsKey).Result()
 	if err != nil {
-		log.Printf("Error getting symbols: %v", err)
-		return
+		return nil, fmt.Errorf("failed to get symbols: %w", err)
 	}
 
+	// Get latest trade for each symbol
 	for _, symbol := range symbols {
-		metrics, err := m.calculateSymbolMetrics(ctx, symbol)
+		key := fmt.Sprintf("%saggTrade:%s:latest", e.config.Redis.KeyPrefix, symbol)
+		data, err := e.client.Get(ctx, key).Result()
+		if err == redis.Nil {
+			continue
+		}
 		if err != nil {
-			log.Printf("Error calculating metrics for %s: %v", symbol, err)
+			log.Printf("Error getting latest trade for %s: %v", symbol, err)
 			continue
 		}
 
-		m.mutex.Lock()
-		m.metrics[symbol] = metrics
-		m.mutex.Unlock()
-	}
-}
-
-// calculateSymbolMetrics calculates metrics for a single symbol
-func (m *MetricsExporter) calculateSymbolMetrics(ctx context.Context, symbol string) (*TradeMetrics, error) {
-	historyKey := fmt.Sprintf("%saggTrade:%s:history", m.config.Redis.KeyPrefix, symbol)
-	now := time.Now()
-	start := now.Add(-24 * time.Hour)
-
-	// Get trades from last 24 hours
-	trades, err := m.redis.ZRangeByScore(ctx, historyKey, &redis.ZRangeBy{
-		Min: fmt.Sprintf("%d", start.UnixNano()),
-		Max: fmt.Sprintf("%d", now.UnixNano()),
-	}).Result()
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to get trades: %w", err)
-	}
-
-	metrics := &TradeMetrics{
-		Symbol:     symbol,
-		LastUpdate: now,
-	}
-
-	var volume float64
-	for _, trade := range trades {
-		var event struct {
-			Data struct {
-				Price    string `json:"p"`
-				Quantity string `json:"q"`
-			} `json:"data"`
-		}
-
-		if err := json.Unmarshal([]byte(trade), &event); err != nil {
+		var trade models.Trade
+		if err := json.Unmarshal([]byte(data), &trade); err != nil {
+			log.Printf("Error unmarshaling trade data for %s: %v", symbol, err)
 			continue
 		}
 
-		price, _ := strconv.ParseFloat(event.Data.Price, 64)
-		quantity, _ := strconv.ParseFloat(event.Data.Quantity, 64)
-
-		if price > metrics.HighPrice24h {
-			metrics.HighPrice24h = price
-		}
-		if metrics.LowPrice24h == 0 || price < metrics.LowPrice24h {
-			metrics.LowPrice24h = price
-		}
-
-		volume += price * quantity
-		metrics.Price = price // Last price
+		metrics.Prices[symbol] = trade.Price
 	}
-
-	metrics.Volume24h = volume
-	metrics.TradeCount24h = int64(len(trades))
 
 	return metrics, nil
 }
 
-// GetMetrics returns current metrics for a symbol
-func (m *MetricsExporter) GetMetrics(symbol string) (*TradeMetrics, bool) {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-	metrics, ok := m.metrics[symbol]
-	return metrics, ok
-}
-
-// GetAllMetrics returns metrics for all symbols
-func (m *MetricsExporter) GetAllMetrics() map[string]*TradeMetrics {
-	m.mutex.RLock()
-	defer m.mutex.RUnlock()
-	
-	// Create a copy to avoid map mutations while reading
-	metrics := make(map[string]*TradeMetrics, len(m.metrics))
-	for k, v := range m.metrics {
-		metrics[k] = v
+// exportMetrics exports the collected metrics
+func (e *MetricsExporter) exportMetrics(metrics *Metrics) {
+	for symbol, price := range metrics.Prices {
+		log.Printf("Price for %s: %s", symbol, price)
 	}
-	return metrics
-}
-
-// Stop stops the metrics collection
-func (m *MetricsExporter) Stop() {
-	close(m.stopCh)
 } 

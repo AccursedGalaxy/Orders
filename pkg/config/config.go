@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"time"
@@ -87,4 +88,18 @@ func getRedisURL() string {
 	defaultURL := "redis://localhost:6379/0"
 	log.Printf("No Redis URL found in environment variables (CUSTOM_REDIS_URL or REDIS_URL), using default local URL: %s", defaultURL)
 	return defaultURL
+}
+
+// Validate checks if the configuration is valid
+func (c *Config) Validate() error {
+	if c.Redis.RetentionPeriod <= 0 {
+		return fmt.Errorf("retention period must be positive")
+	}
+	if c.Redis.CleanupInterval <= 0 {
+		return fmt.Errorf("cleanup interval must be positive")
+	}
+	if c.Redis.MaxTradesPerKey < 0 {
+		return fmt.Errorf("max trades per key must be non-negative")
+	}
+	return nil
 } 

@@ -66,11 +66,10 @@ func (a *TradeAggregator) ProcessTrade(ctx context.Context, trade *models.Trade)
 	// Get or create candle
 	candle, exists := a.candles[key]
 	if !exists {
-		candle = models.NewCandle(trade)
+		candle = models.NewCandle(candleTime)
 		a.candles[key] = candle
-	} else {
-		candle.UpdateCandle(trade)
 	}
+	candle.UpdateFromTrade(trade)
 
 	return nil
 }
@@ -140,9 +139,11 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 			tradeTime := time.Unix(0, trade.Data.TradeTime).Truncate(time.Minute)
 			
 			if candle, exists := candleMap[tradeTime]; exists {
-				candle.UpdateCandle(trade.Data.ToTrade())
+				candle.UpdateFromTrade(trade.Data.ToTrade())
 			} else {
-				candleMap[tradeTime] = models.NewCandle(trade.Data.ToTrade())
+				candle = models.NewCandle(tradeTime)
+				candle.UpdateFromTrade(trade.Data.ToTrade())
+				candleMap[tradeTime] = candle
 			}
 		}
 
@@ -161,4 +162,39 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 // Stop stops the aggregator
 func (a *TradeAggregator) Stop() {
 	close(a.stopCh)
+}
+
+// processTrade processes a single trade and updates the corresponding candle
+func (a *TradeAggregator) processTrade(ctx context.Context, trade *models.Trade) error {
+	timestamp := time.Unix(0, trade.Time).Truncate(time.Minute)
+	key := fmt.Sprintf("%s:%d", trade.Symbol, timestamp.Unix())
+
+	a.candleMu.Lock()
+	candle, exists := a.candles[key]
+	if !exists {
+		candle = models.NewCandle(timestamp)
+		a.candles[key] = candle
+	}
+	candle.UpdateFromTrade(trade)
+	a.candleMu.Unlock()
+
+	return nil
+}
+
+// processRawTrade processes a raw trade event and updates the corresponding candle
+func (a *TradeAggregator) processRawTrade(ctx context.Context, event *models.AggTradeEvent) error {
+	trade := event.Data.ToTrade()
+	timestamp := time.Unix(0, trade.Time).Truncate(time.Minute)
+	key := fmt.Sprintf("%s:%d", trade.Symbol, timestamp.Unix())
+
+	a.candleMu.Lock()
+	candle, exists := a.candles[key]
+	if !exists {
+		candle = models.NewCandle(timestamp)
+		a.candles[key] = candle
+	}
+	candle.UpdateFromTrade(trade)
+	a.candleMu.Unlock()
+
+	return nil
 } 
