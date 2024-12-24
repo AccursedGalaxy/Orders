@@ -5,7 +5,7 @@ This application streams aggregated trades from Binance USDS-Margined Futures We
 ## Prerequisites
 
 - Go 1.20 or later
-- Redis server running on localhost:6379
+- Redis server running on localhost:6379 (for local development)
 - Internet connection to access Binance API
 
 ## Installation
@@ -30,6 +30,25 @@ cd binance-redis-streamer
 go mod download
 ```
 
+## Configuration
+
+The application supports different Redis configurations based on the environment:
+
+1. **Local Development (Default)**:
+   - By default, connects to Redis at `redis://localhost:6379/0`
+   - No configuration needed if using default local Redis settings
+
+2. **Custom Redis URL**:
+   - Copy `.env.example` to `.env`:
+     ```bash
+     cp .env.example .env
+     ```
+   - Uncomment and modify `CUSTOM_REDIS_URL` in `.env` file
+
+3. **Heroku Deployment**:
+   - The application automatically uses the `REDIS_URL` provided by Heroku Redis add-on
+   - No manual configuration needed
+
 ## Usage
 
 1. Make sure Redis is running:
@@ -39,7 +58,7 @@ sudo systemctl start redis
 
 2. Run the application:
 ```bash
-go run main.go
+go run cmd/streamer/main.go
 ```
 
 The application will:

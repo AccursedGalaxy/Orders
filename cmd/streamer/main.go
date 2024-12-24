@@ -7,6 +7,8 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/joho/godotenv"
+
 	"binance-redis-streamer/pkg/binance"
 	"binance-redis-streamer/pkg/config"
 	"binance-redis-streamer/pkg/metrics"
@@ -14,11 +16,22 @@ import (
 )
 
 func main() {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Printf("Warning: Error loading .env file: %v", err)
+	}
+
+	// If CUSTOM_REDIS_URL is set, unset REDIS_URL to ensure we use the custom URL
+	if os.Getenv("CUSTOM_REDIS_URL") != "" {
+		os.Unsetenv("REDIS_URL")
+	}
+
 	// Load configuration
 	cfg := config.DefaultConfig()
 	
 	// Debug: Print environment and configuration
 	log.Printf("REDIS_URL environment variable present: %v", os.Getenv("REDIS_URL") != "")
+	log.Printf("CUSTOM_REDIS_URL environment variable present: %v", os.Getenv("CUSTOM_REDIS_URL") != "")
 	log.Printf("Redis Configuration - URL: %s", cfg.Redis.URL)
 	
 	// Create storage

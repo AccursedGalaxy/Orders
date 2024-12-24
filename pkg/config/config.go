@@ -55,13 +55,24 @@ func DefaultConfig() *Config {
 	}
 }
 
-// getRedisURL returns the Redis URL from environment
+// getRedisURL returns the Redis URL based on the environment
 func getRedisURL() string {
-	// Heroku Redis sets REDIS_URL environment variable
-	url := os.Getenv("REDIS_URL")
-	if url == "" {
-		log.Fatal("REDIS_URL environment variable is required but not set")
+	// First check for custom Redis URL (highest priority for local development)
+	url := os.Getenv("CUSTOM_REDIS_URL")
+	if url != "" {
+		log.Printf("Using custom Redis URL from CUSTOM_REDIS_URL environment variable")
+		return url
 	}
-	log.Printf("Using Redis URL from environment: %s", url)
-	return url
+
+	// Then check for Heroku Redis URL (used in Heroku environment)
+	url = os.Getenv("REDIS_URL")
+	if url != "" {
+		log.Printf("Using Heroku Redis URL from REDIS_URL environment variable")
+		return url
+	}
+
+	// Default to local Redis if no environment variables are set
+	defaultURL := "redis://localhost:6379/0"
+	log.Printf("No Redis URL found in environment variables (CUSTOM_REDIS_URL or REDIS_URL), using default local URL: %s", defaultURL)
+	return defaultURL
 } 
