@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/AccursedGalaxy/Orders)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/Go-1.21-00ADD8.svg)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Redis](https://img.shields.io/badge/Redis-6.x-red.svg)](https://redis.io/)
 [![Binance](https://img.shields.io/badge/Binance-API-yellow.svg)](https://binance.com/)
