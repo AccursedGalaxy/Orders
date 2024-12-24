@@ -2,8 +2,10 @@ package binance
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -36,13 +38,29 @@ func setupTestServer() (*httptest.Server, *config.Config) {
 
 type mockStore struct {
 	storage.TradeStore
+	mu sync.RWMutex
+	trades map[string]*models.Trade
+	rawTrades map[string][]byte
+}
+
+func newMockStore() *mockStore {
+	return &mockStore{
+		trades: make(map[string]*models.Trade),
+		rawTrades: make(map[string][]byte),
+	}
 }
 
 func (m *mockStore) StoreTrade(ctx context.Context, trade *models.Trade) error {
+	m.mu.Lock()
+	m.trades[trade.Symbol] = trade
+	m.mu.Unlock()
 	return nil
 }
 
 func (m *mockStore) StoreRawTrade(ctx context.Context, symbol string, data []byte) error {
+	m.mu.Lock()
+	m.rawTrades[symbol] = data
+	m.mu.Unlock()
 	return nil
 }
 
@@ -51,7 +69,13 @@ func (m *mockStore) GetTradeHistory(ctx context.Context, symbol string, start, e
 }
 
 func (m *mockStore) GetLatestTrade(ctx context.Context, symbol string) (*models.Trade, error) {
-	return nil, nil
+	m.mu.RLock()
+	trade, ok := m.trades[symbol]
+	m.mu.RUnlock()
+	if !ok {
+		return nil, fmt.Errorf("no trade found")
+	}
+	return trade, nil
 }
 
 func (m *mockStore) GetRedisClient() *redis.Client {
@@ -82,7 +106,7 @@ func BenchmarkGetSymbols(b *testing.B) {
 
 func BenchmarkProcessMessage(b *testing.B) {
 	cfg := config.DefaultConfig()
-	client := NewClient(cfg, &mockStore{})
+	client := NewTestClient(cfg, newMockStore())
 	ctx := context.Background()
 
 	message := []byte(`{
@@ -101,8 +125,8 @@ func BenchmarkProcessMessage(b *testing.B) {
 	}`)
 
 	b.ResetTimer()
-	b.Run("ProcessMessage", func(b *testing.B) {
-		for i := 0; i < b.N; i++ {
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
 			if err := client.processMessage(ctx, message); err != nil {
 				b.Fatal(err)
 			}

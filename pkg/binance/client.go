@@ -23,6 +23,7 @@ import (
 type Client struct {
 	config *config.Config
 	store  storage.TradeStore
+	isTest bool // Added for test mode
 }
 
 // NewClient creates a new Binance client
@@ -30,6 +31,16 @@ func NewClient(cfg *config.Config, store storage.TradeStore) *Client {
 	return &Client{
 		config: cfg,
 		store:  store,
+		isTest: false,
+	}
+}
+
+// NewTestClient creates a new Binance client for testing
+func NewTestClient(cfg *config.Config, store storage.TradeStore) *Client {
+	return &Client{
+		config: cfg,
+		store:  store,
+		isTest: true,
 	}
 }
 
@@ -324,8 +335,11 @@ func (c *Client) processMessage(ctx context.Context, message []byte) error {
 		return fmt.Errorf("failed to store raw trade: %w", err)
 	}
 
-	log.Printf("Processed trade for %s: price=%s, quantity=%s",
-		trade.Symbol, trade.Price, trade.Quantity)
+	// Only log in non-test mode
+	if !c.isTest {
+		log.Printf("Processed trade for %s: price=%s, quantity=%s",
+			trade.Symbol, trade.Price, trade.Quantity)
+	}
 
 	return nil
 } 
