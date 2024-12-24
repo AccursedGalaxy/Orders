@@ -50,7 +50,7 @@ func DefaultConfig() *Config {
 			CleanupInterval: 1 * time.Hour,
 			KeyPrefix:       "binance:",
 			UseCompression:  true,
-			MaxTradesPerKey: 100000, // Limit history per symbol
+			MaxTradesPerKey: 1000000, // Limit history per symbol
 		},
 		Binance: BinanceConfig{
 			BaseURL:           "https://api.binance.com",

@@ -36,14 +36,14 @@ type RedisStore struct {
 // NewRedisStore creates a new Redis store
 func NewRedisStore(cfg *config.Config) (*RedisStore, error) {
 	if cfg.Redis.URL == "" {
-		return nil, fmt.Errorf("Redis URL is empty")
+		return nil, fmt.Errorf("redis URL is empty")
 	}
 	
 	log.Printf("Attempting to connect to Redis at URL: %s", cfg.Redis.URL)
 	
 	opt, err := redis.ParseURL(cfg.Redis.URL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
+		return nil, fmt.Errorf("failed to parse redis URL: %w", err)
 	}
 
 	// Configure TLS for Heroku Redis

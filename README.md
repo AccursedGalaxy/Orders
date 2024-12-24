@@ -1,156 +1,118 @@
-# 🚀 Binance Redis Streamer
+# Binance Trade Streamer
 
-<div align="center">
+A Go application that streams trade data from Binance, stores recent data in Redis, and archives historical data in PostgreSQL with time-series optimization.
 
-[![Go Version](https://img.shields.io/badge/Go-1.21-00ADD8.svg)](https://go.dev/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Redis](https://img.shields.io/badge/Redis-6.x-red.svg)](https://redis.io/)
-[![Binance](https://img.shields.io/badge/Binance-API-yellow.svg)](https://binance.com/)
+## Features
 
-*A high-performance, production-ready Go service for real-time cryptocurrency trade data streaming and analytics.*
+- Real-time trade streaming for major cryptocurrency pairs
+- Redis-based hot storage for recent trades (2 hours)
+- PostgreSQL/TimescaleDB for historical data storage
+- Automatic data aggregation into 1-minute candles
+- Configurable symbol selection and data retention
+- Metrics collection and monitoring
 
-[Key Features](#key-features) • [Installation](#installation) • [Quick Start](#quick-start) • [Documentation](#documentation) • [Contributing](#contributing)
+## Requirements
 
-</div>
+- Go 1.21 or later
+- Redis 6.x or later
+- PostgreSQL 12.x or later with TimescaleDB extension
+- Heroku CLI (for deployment)
 
-## 📋 Overview
+## Local Setup
 
-Binance Redis Streamer is a robust, production-grade application that provides real-time streaming and storage of cryptocurrency trade data from Binance. Built with Go's high-performance concurrency patterns and Redis's in-memory data structure store, it offers reliable, low-latency data processing for cryptocurrency trading applications.
-
-## 🎯 Key Features
-
-- **Real-time Trade Streaming**
-  - WebSocket-based connection to Binance's trade streams
-  - Automatic connection management and recovery
-  - Support for multiple trading pairs (USDT markets)
-
-- **Efficient Data Storage**
-  - Redis-based storage with configurable retention policies
-  - Optimized data structures for fast retrieval
-  - Automatic data cleanup and management
-
-- **Advanced Metrics**
-  - 24-hour rolling trade volume
-  - Price high/low tracking
-  - Trade count analytics
-  - Real-time performance monitoring
-
-- **Production Ready**
-  - Graceful shutdown handling
-  - Comprehensive error management
-  - Connection retry mechanisms
-  - Detailed logging
-
-## 🛠 Technical Architecture
-
-```mermaid
-graph LR
-    A[Binance WebSocket] --> B[Trade Streamer]
-    B --> C[Redis Storage]
-    C --> D[Metrics Exporter]
-    C --> E[Data Viewer]
-```
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Go 1.21 or higher
-- Redis 6.x or higher
-- Git
-
-### Installation
-
+1. Clone the repository:
 ```bash
-# Clone the repository
 git clone https://github.com/yourusername/binance-redis-streamer.git
 cd binance-redis-streamer
+```
 
-# Install dependencies
+2. Install dependencies:
+```bash
 go mod download
 ```
 
-### Configuration
-
-Create a `.env` file in the project root:
-
-```env
-# Required Configuration
-REDIS_URL=redis://localhost:6379/0
-
-# Optional Configuration
-CUSTOM_REDIS_URL=redis://custom-host:6379/0  # Development override
+3. Copy the environment template:
+```bash
+cp .env.example .env
 ```
 
-### Running the Service
-
+4. Set up local databases:
 ```bash
-# Build the service
-go build -o bin/streamer cmd/streamer/main.go
+# Start Redis
+docker run -d -p 6379:6379 redis:6
 
-# Start the service
+# Start PostgreSQL with TimescaleDB
+docker run -d -p 5432:5432 \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=binance_trades \
+  timescale/timescaledb:latest-pg12
+```
+
+5. Build and run:
+```bash
+go build -o bin/streamer cmd/streamer/main.go
 ./bin/streamer
 ```
 
-## 📁 Project Structure
+## Heroku Deployment
 
-```
-binance-redis-streamer/
-├── cmd/                    # Application entrypoints
-│   └── streamer/          # Main service
-├── internal/              # Private application code
-│   └── models/            # Data models
-├── pkg/                   # Public libraries
-│   ├── binance/          # Binance API client
-│   ├── config/           # Configuration management
-│   ├── metrics/          # Metrics collection
-│   └── storage/          # Redis implementation
-├── scripts/              # Utility scripts
-└── analysis/             # Trade analysis tools
+1. Create a new Heroku app:
+```bash
+heroku create your-app-name
 ```
 
-## 📈 Performance
+2. Add required add-ons:
+```bash
+heroku addons:create heroku-redis:hobby-dev
+heroku addons:create timescale
+```
 
-- Handles 1000+ trades per second
-- Sub-millisecond storage latency
-- Minimal memory footprint
-- Efficient garbage collection
+3. Configure environment variables:
+```bash
+heroku config:set MAX_SYMBOLS=3
+heroku config:set RETENTION_DAYS=90
+```
 
-## 🔧 Advanced Configuration
+4. Deploy:
+```bash
+git push heroku main
+```
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `REDIS_RETENTION_PERIOD` | Data retention time | 24h |
-| `CLEANUP_INTERVAL` | Cleanup frequency | 1h |
-| `MAX_STREAMS_PER_CONN` | Max streams per connection | 200 |
-| `RECONNECT_DELAY` | WebSocket reconnect delay | 5s |
+5. Start the worker:
+```bash
+heroku ps:scale worker=1
+```
 
-## 🤝 Contributing
+## Configuration
 
-We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
+The application can be configured through environment variables:
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- `REDIS_URL`: Redis connection URL (set by Heroku Redis)
+- `DATABASE_URL`: PostgreSQL connection URL (set by TimescaleDB)
+- `MAX_SYMBOLS`: Maximum number of symbols to track (default: 3)
+- `RETENTION_DAYS`: Days to keep historical data (default: 90)
+- `LOG_LEVEL`: Logging level (default: info)
 
-## 📜 License
+## Architecture
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+1. **Data Flow**:
+   - Binance WebSocket → Redis (recent trades)
+   - Redis → PostgreSQL (historical aggregation)
+   - PostgreSQL TimescaleDB (time-series storage)
 
-## 🙏 Acknowledgments
+2. **Storage Strategy**:
+   - Redis: Last 2 hours of raw trade data
+   - PostgreSQL: 1-minute candles with 90-day retention
+   - TimescaleDB: Automatic partitioning and optimization
 
-- [Binance API Documentation](https://binance-docs.github.io/apidocs/)
-- [Redis Documentation](https://redis.io/documentation)
-- [Go WebSocket](https://github.com/gorilla/websocket)
+## Monitoring
 
-## 📞 Support
+The application exports metrics for:
+- Trade volume per symbol
+- Trade count per minute
+- Storage usage
+- Connection status
 
-For support and questions, please [open an issue](https://github.com/AccursedGalaxy/Orders/issues) or contact the maintainers.
+## License
 
----
-
-<div align="center">
-Made with ❤️ by Accursed Galaxy
-</div>
+MIT License

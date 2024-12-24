@@ -11,7 +11,7 @@ import (
 	"github.com/alicebob/miniredis/v2"
 )
 
-func setupTestRedis(t *testing.T) (*RedisStore, *miniredis.Miniredis, error) {
+func setupTestRedis() (*RedisStore, *miniredis.Miniredis, error) {
 	mr, err := miniredis.Run()
 	if err != nil {
 		return nil, nil, err
@@ -36,7 +36,7 @@ func setupTestRedis(t *testing.T) (*RedisStore, *miniredis.Miniredis, error) {
 }
 
 func BenchmarkStoreTrade(b *testing.B) {
-	store, mr, err := setupTestRedis(nil)
+	store, mr, err := setupTestRedis()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -44,12 +44,12 @@ func BenchmarkStoreTrade(b *testing.B) {
 	defer store.Close()
 
 	trade := &models.Trade{
-		Symbol:    "BTCUSDT",
-		Price:     "50000.00",
-		Quantity:  "1.5",
-		TradeID:   12345,
-		Time:      time.Now().UnixNano(),
-		EventTime: time.Now().UnixNano(),
+			Symbol:    "BTCUSDT",
+			Price:     "50000.00",
+			Quantity:  "1.5",
+			TradeID:   12345,
+			Time:      time.Now().UnixNano(),
+			EventTime: time.Now().UnixNano(),
 	}
 
 	ctx := context.Background()
@@ -65,7 +65,7 @@ func BenchmarkStoreTrade(b *testing.B) {
 }
 
 func BenchmarkStoreRawTrade(b *testing.B) {
-	store, mr, err := setupTestRedis(nil)
+	store, mr, err := setupTestRedis()
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func BenchmarkStoreRawTrade(b *testing.B) {
 }
 
 func BenchmarkGetTradeHistory(b *testing.B) {
-	store, mr, err := setupTestRedis(nil)
+	store, mr, err := setupTestRedis()
 	if err != nil {
 		b.Fatal(err)
 	}

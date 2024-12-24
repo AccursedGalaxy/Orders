@@ -5,7 +5,11 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
+	"time"
+
+	_ "github.com/lib/pq" // PostgreSQL driver
 
 	"github.com/joho/godotenv"
 
@@ -21,31 +25,31 @@ func main() {
 		log.Printf("Warning: Error loading .env file: %v", err)
 	}
 
-	// If CUSTOM_REDIS_URL is set, unset REDIS_URL to ensure we use the custom URL
-	if os.Getenv("CUSTOM_REDIS_URL") != "" {
-		os.Unsetenv("REDIS_URL")
-	}
-
 	// Load configuration
-	cfg := config.DefaultConfig()
+	cfg := loadConfig()
 	
-	// Debug: Print environment and configuration
-	log.Printf("REDIS_URL environment variable present: %v", os.Getenv("REDIS_URL") != "")
-	log.Printf("CUSTOM_REDIS_URL environment variable present: %v", os.Getenv("CUSTOM_REDIS_URL") != "")
-	log.Printf("Redis Configuration - URL: %s", cfg.Redis.URL)
-	
-	// Create storage
-	store, err := storage.NewRedisStore(cfg)
+	// Create Redis store
+	redisStore, err := storage.NewRedisStore(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create Redis store: %v", err)
 	}
-	defer store.Close()
+	defer redisStore.Close()
+
+	// Create PostgreSQL store
+	postgresStore, err := storage.NewPostgresStore()
+	if err != nil {
+		log.Fatalf("Failed to create PostgreSQL store: %v", err)
+	}
+	defer postgresStore.Close()
+
+	// Create trade aggregator
+	aggregator := storage.NewTradeAggregator(redisStore, postgresStore)
 
 	// Create metrics exporter
-	exporter := metrics.NewMetricsExporter(cfg, store.GetRedisClient())
+	exporter := metrics.NewMetricsExporter(cfg, redisStore.GetRedisClient())
 
 	// Create Binance client
-	client := binance.NewClient(cfg, store)
+	client := binance.NewClient(cfg, redisStore)
 
 	// Set up context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
@@ -53,6 +57,9 @@ func main() {
 
 	// Start metrics collection
 	go exporter.Start(ctx)
+
+	// Start trade aggregator
+	go aggregator.Start(ctx)
 
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
@@ -62,6 +69,10 @@ func main() {
 		sig := <-sigChan
 		log.Printf("Received signal %v, shutting down...", sig)
 		cancel()
+		
+		// Allow some time for cleanup
+		time.Sleep(5 * time.Second)
+		os.Exit(0)
 	}()
 
 	// Start streaming
@@ -70,4 +81,23 @@ func main() {
 		log.Printf("Streaming ended with error: %v", err)
 		os.Exit(1)
 	}
+}
+
+func loadConfig() *config.Config {
+	cfg := config.DefaultConfig()
+
+	// Override configuration from environment variables
+	if maxSymbols := os.Getenv("MAX_SYMBOLS"); maxSymbols != "" {
+		if val, err := strconv.Atoi(maxSymbols); err == nil {
+			cfg.Binance.MaxSymbols = val
+		}
+	}
+
+	if retentionDays := os.Getenv("RETENTION_DAYS"); retentionDays != "" {
+		if val, err := strconv.Atoi(retentionDays); err == nil {
+			cfg.Redis.RetentionPeriod = time.Duration(val) * 24 * time.Hour
+		}
+	}
+
+	return cfg
 } 
