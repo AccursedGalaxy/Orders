@@ -11,6 +11,10 @@ on:
 jobs:
   test:
     name: Test
+    # Skip if this is a version tag push and we're also pushing to main
+    if: |
+      !startsWith(github.ref, 'refs/tags/v') ||
+      (startsWith(github.ref, 'refs/tags/v') && !contains(github.event.head_commit.message, 'Bump version to'))
     runs-on: ubuntu-22.04
     services:
       redis:
@@ -46,7 +50,12 @@ jobs:
     name: Build
     needs: test
     runs-on: ubuntu-22.04
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v'))
+    if: |
+      github.event_name == 'push' &&
+      (
+        (github.ref == 'refs/heads/main' && !contains(github.event.head_commit.message, 'Bump version to')) ||
+        startsWith(github.ref, 'refs/tags/v')
+      )
 
     steps:
     - uses: actions/checkout@v4
