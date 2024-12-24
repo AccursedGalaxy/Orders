@@ -1,0 +1,69 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    services:
+      redis:
+        image: redis
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.19'
+
+    - name: Install dependencies
+      run: |
+        go mod download
+        go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+    - name: Run linter
+      run: golangci-lint run ./...
+
+    - name: Run tests
+      run: go test -v -race ./...
+
+    - name: Run benchmarks
+      run: go test -v -run=^$ -bench=. -benchmem ./...
+
+  build:
+    name: Build
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.19'
+
+    - name: Build
+      run: |
+        go build -v -o bin/streamer cmd/streamer/main.go
+        go build -v -o bin/redis-viewer scripts/redis-viewer.go
+
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: binaries
+        path: bin/ 
