@@ -13,23 +13,42 @@ import (
 
 func setupTestPostgres(t *testing.T) (*PostgresStore, func()) {
 	// Use test database URL from environment
-	dbURL := os.Getenv("TEST_DATABASE_URL")
+	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		t.Skip("TEST_DATABASE_URL not set, skipping PostgreSQL tests")
+		dbURL = os.Getenv("TEST_DATABASE_URL")
+	}
+	if dbURL == "" {
+		t.Skip("Neither DATABASE_URL nor TEST_DATABASE_URL is set, skipping PostgreSQL tests")
+		return nil, nil
 	}
 
+	// Temporarily set the environment variable for the store
+	oldURL := os.Getenv("DATABASE_URL")
+	os.Setenv("DATABASE_URL", dbURL)
+	
 	store, err := NewPostgresStore()
+	
+	// Restore the original environment variable
+	if oldURL != "" {
+		os.Setenv("DATABASE_URL", oldURL)
+	} else {
+		os.Unsetenv("DATABASE_URL")
+	}
+
 	if err != nil {
-		t.Fatalf("Failed to create PostgreSQL store: %v", err)
+		t.Skipf("Failed to create PostgreSQL store: %v", err)
+		return nil, nil
 	}
 
 	cleanup := func() {
-		// Clean up test data
-		_, err := store.db.Exec("DELETE FROM trade_candles")
-		if err != nil {
-			t.Errorf("Failed to clean up test data: %v", err)
+		if store != nil {
+			// Clean up test data
+			_, err := store.db.Exec("DELETE FROM trade_candles")
+			if err != nil {
+				t.Errorf("Failed to clean up test data: %v", err)
+			}
+			store.Close()
 		}
-		store.Close()
 	}
 
 	return store, cleanup

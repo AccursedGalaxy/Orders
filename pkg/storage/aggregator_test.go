@@ -15,6 +15,12 @@ func setupTestAggregator(t *testing.T) (*TradeAggregator, func()) {
 	}
 
 	postgresStore, cleanup := setupTestPostgres(t)
+	if postgresStore == nil {
+		mr.Close()
+		redisStore.Close()
+		t.Skip("PostgreSQL store not available, skipping aggregator tests")
+		return nil, nil
+	}
 
 	aggregator := NewTradeAggregator(redisStore, postgresStore)
 
