@@ -42,6 +42,12 @@ func NewRedisStore(cfg *config.Config) (*RedisStore, error) {
 	}
 	log.Printf("Parsed Redis options: addr=%s db=%d", opt.Addr, opt.DB)
 
+	// Configure TLS for Heroku Redis
+	if opt.TLSConfig != nil {
+		log.Printf("Configuring TLS for Redis connection")
+		opt.TLSConfig.InsecureSkipVerify = true
+	}
+
 	client := redis.NewClient(opt)
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
