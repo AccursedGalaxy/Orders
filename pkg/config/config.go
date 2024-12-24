@@ -44,7 +44,7 @@ func DefaultConfig() *Config {
 			KeyPrefix:       "binance:",
 		},
 		Binance: BinanceConfig{
-			BaseURL:            "https://api.binance.us",
+			BaseURL:            "https://api.binance.com",
 			MaxStreamsPerConn:  200,
 			HistorySize:        1000,
 		},
