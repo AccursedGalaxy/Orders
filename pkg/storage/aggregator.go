@@ -163,38 +163,3 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 func (a *TradeAggregator) Stop() {
 	close(a.stopCh)
 }
-
-// processTrade processes a single trade and updates the corresponding candle
-func (a *TradeAggregator) processTrade(ctx context.Context, trade *models.Trade) error {
-	timestamp := time.Unix(0, trade.Time).Truncate(time.Minute)
-	key := fmt.Sprintf("%s:%d", trade.Symbol, timestamp.Unix())
-
-	a.candleMu.Lock()
-	candle, exists := a.candles[key]
-	if !exists {
-		candle = models.NewCandle(timestamp)
-		a.candles[key] = candle
-	}
-	candle.UpdateFromTrade(trade)
-	a.candleMu.Unlock()
-
-	return nil
-}
-
-// processRawTrade processes a raw trade event and updates the corresponding candle
-func (a *TradeAggregator) processRawTrade(ctx context.Context, event *models.AggTradeEvent) error {
-	trade := event.Data.ToTrade()
-	timestamp := time.Unix(0, trade.Time).Truncate(time.Minute)
-	key := fmt.Sprintf("%s:%d", trade.Symbol, timestamp.Unix())
-
-	a.candleMu.Lock()
-	candle, exists := a.candles[key]
-	if !exists {
-		candle = models.NewCandle(timestamp)
-		a.candles[key] = candle
-	}
-	candle.UpdateFromTrade(trade)
-	a.candleMu.Unlock()
-
-	return nil
-} 
