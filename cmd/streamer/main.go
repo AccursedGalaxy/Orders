@@ -9,13 +9,15 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/lib/pq" // PostgreSQL driver
-
 	"github.com/joho/godotenv"
+	_ "github.com/lib/pq"
 
 	"binance-redis-streamer/pkg/binance"
 	"binance-redis-streamer/pkg/config"
+	"binance-redis-streamer/pkg/ingestion"
+	"binance-redis-streamer/pkg/messaging"
 	"binance-redis-streamer/pkg/metrics"
+	"binance-redis-streamer/pkg/processor"
 	"binance-redis-streamer/pkg/storage"
 )
 
@@ -27,13 +29,17 @@ func main() {
 
 	// Load configuration
 	cfg := loadConfig()
-	
+
 	// Create Redis store
 	redisStore, err := storage.NewRedisStore(cfg)
 	if err != nil {
 		log.Fatalf("Failed to create Redis store: %v", err)
 	}
 	defer redisStore.Close()
+
+	// Create message bus using Redis
+	messageBus := messaging.NewRedisBus(redisStore.GetRedisClient())
+	defer messageBus.Close()
 
 	// Create PostgreSQL store
 	postgresStore, err := storage.NewPostgresStore()
@@ -51,6 +57,12 @@ func main() {
 	// Create Binance client
 	client := binance.NewClient(cfg, redisStore)
 
+	// Create ingestion service
+	ingestService := ingestion.NewService(cfg, client, messageBus)
+
+	// Create processor service
+	processService := processor.NewService(cfg, messageBus, redisStore, aggregator)
+
 	// Set up context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -61,26 +73,36 @@ func main() {
 	// Start trade aggregator
 	go aggregator.Start(ctx)
 
+	// Start processor service
+	go func() {
+		if err := processService.Start(ctx); err != nil {
+			log.Printf("Processor service error: %v", err)
+			cancel()
+		}
+	}()
+
+	// Start ingestion service
+	go func() {
+		if err := ingestService.Start(ctx); err != nil {
+			log.Printf("Ingestion service error: %v", err)
+			cancel()
+		}
+	}()
+
 	// Handle graceful shutdown
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	go func() {
-		sig := <-sigChan
-		log.Printf("Received signal %v, shutting down...", sig)
-		cancel()
-		
-		// Allow some time for cleanup
-		time.Sleep(5 * time.Second)
-		os.Exit(0)
-	}()
+	sig := <-sigChan
+	log.Printf("Received signal %v, shutting down...", sig)
+	cancel()
 
-	// Start streaming
-	log.Println("Starting trade streamer...")
-	if err := client.StreamTrades(ctx); err != nil {
-		log.Printf("Streaming ended with error: %v", err)
-		os.Exit(1)
-	}
+	// Stop services
+	processService.Stop()
+	ingestService.Stop()
+	
+	// Allow some time for cleanup
+	time.Sleep(5 * time.Second)
 }
 
 func loadConfig() *config.Config {

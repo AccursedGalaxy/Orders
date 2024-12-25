@@ -1,6 +1,7 @@
 package models
 
 import (
+	"encoding/json"
 	"strconv"
 	"time"
 )
@@ -18,22 +19,38 @@ type ExchangeInfo struct {
 
 // AggTradeEvent represents an aggregated trade event from WebSocket
 type AggTradeEvent struct {
-	Stream string     `json:"stream"`
+	Stream string    `json:"stream"`
 	Data   TradeData `json:"data"`
+	Raw    []byte    `json:"-"` // Raw message data
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for AggTradeEvent
+func (e *AggTradeEvent) UnmarshalJSON(data []byte) error {
+	type Alias AggTradeEvent
+	aux := &struct {
+		*Alias
+	}{
+		Alias: (*Alias)(e),
+	}
+	if err := json.Unmarshal(data, aux); err != nil {
+		return err
+	}
+	e.Raw = data
+	return nil
 }
 
 // TradeData represents the actual trade data
 type TradeData struct {
-	EventType string `json:"e"`
-	EventTime int64  `json:"E"`
-	Symbol    string `json:"s"`
-	Price     string `json:"p"`
-	Quantity  string `json:"q"`
-	TradeID   int64  `json:"a"`
-	FirstID   int64  `json:"f"`
-	LastID    int64  `json:"l"`
-	TradeTime int64  `json:"T"`
-	IsBuyerMaker bool `json:"m"`
+	EventType    string `json:"e"`
+	EventTime    int64  `json:"E"`
+	Symbol       string `json:"s"`
+	Price        string `json:"p"`
+	Quantity     string `json:"q"`
+	TradeID      int64  `json:"a"`
+	FirstID      int64  `json:"f"`
+	LastID       int64  `json:"l"`
+	TradeTime    int64  `json:"T"`
+	IsBuyerMaker bool   `json:"m"`
 }
 
 // Trade represents a processed trade ready for storage
@@ -107,11 +124,11 @@ func (c *Candle) UpdateFromTrade(trade *Trade) {
 // ToTrade converts TradeData to Trade
 func (td *TradeData) ToTrade() *Trade {
 	return &Trade{
-			Symbol:    td.Symbol,
-			Price:     td.Price,
-			Quantity:  td.Quantity,
-			TradeID:   td.TradeID,
-			Time:      td.TradeTime,
-			EventTime: td.EventTime,
+		Symbol:    td.Symbol,
+		Price:     td.Price,
+		Quantity:  td.Quantity,
+		TradeID:   td.TradeID,
+		Time:      td.TradeTime,
+		EventTime: td.EventTime,
 	}
 } 

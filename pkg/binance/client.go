@@ -346,4 +346,13 @@ func (c *Client) processMessage(ctx context.Context, message []byte) error {
 	}
 
 	return nil
+}
+
+// buildStreamURL builds the WebSocket stream URL for the given symbols
+func (c *Client) BuildStreamURL(symbols []string) string {
+	var streams []string
+	for _, symbol := range symbols {
+		streams = append(streams, fmt.Sprintf("%s@aggTrade", symbol))
+	}
+	return fmt.Sprintf("wss://stream.binance.com:9443/stream?streams=%s", strings.Join(streams, "/"))
 } 

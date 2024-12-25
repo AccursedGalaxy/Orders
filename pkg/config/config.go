@@ -12,6 +12,7 @@ type Config struct {
 	Redis     RedisConfig
 	Binance   BinanceConfig
 	WebSocket WebSocketConfig
+	NATS      NATSConfig
 }
 
 // RedisConfig holds Redis-specific configuration
@@ -42,6 +43,14 @@ type WebSocketConfig struct {
 	PingInterval   time.Duration
 }
 
+// NATSConfig holds NATS-specific configuration
+type NATSConfig struct {
+	URL            string
+	MaxReconnects  int
+	ReconnectWait  time.Duration
+	ConnectTimeout time.Duration
+}
+
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
@@ -65,6 +74,12 @@ func DefaultConfig() *Config {
 			ReconnectDelay: 5 * time.Second,
 			PingInterval:   5 * time.Second,
 		},
+		NATS: NATSConfig{
+			URL:            getNATSURL(),
+			MaxReconnects:  60,
+			ReconnectWait:  2 * time.Second,
+			ConnectTimeout: 10 * time.Second,
+		},
 	}
 }
 
@@ -87,6 +102,19 @@ func getRedisURL() string {
 	// Default to local Redis if no environment variables are set
 	defaultURL := "redis://localhost:6379/0"
 	log.Printf("No Redis URL found in environment variables (CUSTOM_REDIS_URL or REDIS_URL), using default local URL: %s", defaultURL)
+	return defaultURL
+}
+
+// getNATSURL returns the NATS URL based on the environment
+func getNATSURL() string {
+	url := os.Getenv("NATS_URL")
+	if url != "" {
+		log.Printf("Using NATS URL from environment: %s", url)
+		return url
+	}
+
+	defaultURL := "nats://localhost:4222"
+	log.Printf("No NATS URL found in environment, using default: %s", defaultURL)
 	return defaultURL
 }
 
