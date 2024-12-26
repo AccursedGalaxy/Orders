@@ -12,6 +12,7 @@ jobs:
     if: '!contains(github.event.head_commit.message, ''chore(release)'')'
     permissions:
       contents: write
+      pull-requests: write
     services:
       postgres:
         image: postgres:16
@@ -79,17 +80,18 @@ jobs:
           LATEST_VERSION=${LATEST_TAG#v}
           CURRENT_VERSION=$(jq -r .version project.json)
           
-          # If current version is less than or equal to latest tag, increment patch
-          if [ "$(printf '%s\n' "$LATEST_VERSION" "$CURRENT_VERSION" | sort -V | tail -n1)" != "$CURRENT_VERSION" ]; then
-            NEW_VERSION=$(echo $LATEST_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
-            echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
-            jq ".version = \"$NEW_VERSION\"" project.json > project.json.tmp && mv project.json.tmp project.json
-          else
-            echo "NEW_VERSION=$CURRENT_VERSION" >> $GITHUB_ENV
-          fi
+          # Calculate new version
+          NEW_VERSION=$(echo $LATEST_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
+          echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
-          # Delete local tags to prevent conflicts
-          git tag -l | xargs git tag -d || true
+          # Update project.json with new version
+          jq ".version = \"$NEW_VERSION\"" project.json > project.json.tmp && mv project.json.tmp project.json
+          
+          # Create release branch
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git checkout -b release/v$NEW_VERSION
 
       - name: Generate changelog
         id: changelog
@@ -103,7 +105,7 @@ jobs:
           skip-version-file: false
           skip-commit: false
           skip-on-empty: false
-          git-branch: main
+          git-branch: release/v${{ env.NEW_VERSION }}
           fallback-version: ${{ env.NEW_VERSION }}
 
       - name: Build binaries
@@ -122,17 +124,36 @@ jobs:
           tar czf binance-redis-streamer-linux-amd64.tar.gz streamer-linux-amd64 redis-viewer-linux-amd64
           tar czf binance-redis-streamer-darwin-amd64.tar.gz streamer-darwin-amd64 redis-viewer-darwin-amd64
 
-      - name: Create Release
+      - name: Create Pull Request
+        if: steps.changelog.outputs.skipped == 'false'
+        uses: peter-evans/create-pull-request@v5
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          commit-message: "chore(release): v${{ env.NEW_VERSION }} [skip ci]"
+          title: "chore(release): v${{ env.NEW_VERSION }}"
+          body: |
+            Release version ${{ env.NEW_VERSION }}
+            
+            This PR was automatically created by the release workflow.
+            
+            Changes included in this release:
+            
+            ${{ steps.changelog.outputs.clean_changelog }}
+          branch: release/v${{ env.NEW_VERSION }}
+          base: main
+          labels: release
+
+      - name: Create Draft Release
         if: steps.changelog.outputs.skipped == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          name: Release ${{ steps.changelog.outputs.tag }}
-          tag_name: ${{ steps.changelog.outputs.tag }}
+          name: Release v${{ env.NEW_VERSION }}
+          tag_name: v${{ env.NEW_VERSION }}
           body_path: CHANGELOG.md
           files: |
             bin/binance-redis-streamer-linux-amd64.tar.gz
             bin/binance-redis-streamer-darwin-amd64.tar.gz
-          draft: false
+          draft: true
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
