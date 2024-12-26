@@ -30,6 +30,11 @@ setup: install-hooks tools ## Setup development environment
 	$(GOCMD) mod download
 	$(GOCMD) mod tidy
 
+gitpush: ## Push changes to git - pass last commit message as 'm' argument
+	git add .
+	git commit -m "$(m)"
+	git push
+
 tools: ## Install development tools
 	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."
 	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin $(GOLANGCI_LINT_VERSION)
@@ -140,4 +145,4 @@ bench-compare: ## Run benchmarks and compare with master
 	@git stash pop
 	@$(GOTEST) -v -run=^$$ -bench=. -benchmem ./... > bench-current.txt
 	@benchstat bench-master.txt bench-current.txt
-	@rm bench-master.txt bench-current.txt 
+	@rm bench-master.txt bench-current.txt
