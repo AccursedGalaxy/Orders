@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-redis/redis/v8"
 	"github.com/spf13/cobra"
 
 	"binance-redis-streamer/pkg/config"
@@ -66,6 +67,24 @@ Example: binance-cli watch BTCUSDT ETHUSDT`,
 			}
 
 			cfg := config.DefaultConfig()
+			cfg.Debug = debug
+
+			// First check for custom Redis URL (highest priority for local development)
+			if redisURL := os.Getenv("CUSTOM_REDIS_URL"); redisURL != "" {
+				if debug {
+					log.Printf("Using custom Redis URL from CUSTOM_REDIS_URL")
+				}
+				cfg.Redis.URL = redisURL
+			} else if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
+				// Then check for Heroku Redis URL
+				if debug {
+					log.Printf("Using Heroku Redis URL from REDIS_URL")
+				}
+				cfg.Redis.URL = redisURL
+			} else if debug {
+				log.Printf("Warning: Neither CUSTOM_REDIS_URL nor REDIS_URL set, using default: %s", cfg.Redis.URL)
+			}
+
 			store, err := storage.NewRedisStore(cfg)
 			if err != nil {
 				return fmt.Errorf("failed to connect to Redis: %w", err)
@@ -174,212 +193,162 @@ func formatVolume(volume float64) string {
 }
 
 func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, symbol string, m *symbolMetrics, cfg *config.Config) error {
-	// Get latest trade
-	trade, err := store.GetLatestTrade(ctx, symbol)
-	if err != nil || trade == nil {
-		return fmt.Errorf("no trade data")
-	}
+	// Create a context with timeout for Redis operations
+	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 
-	// Get 24h history - use millisecond timestamps
-	end := time.Now()
-	start := end.Add(-24 * time.Hour)
-	history, err := store.GetTradeHistory(ctx, symbol, start, end)
+	// Get latest trade
+	trade, err := store.GetLatestTrade(timeoutCtx, symbol)
 	if err != nil {
 		if cfg.Debug {
-			log.Printf("Failed to get history for %s: %v", symbol, err)
+			log.Printf("Error getting latest trade for %s: %v", symbol, err)
 		}
-		return fmt.Errorf("failed to get history: %w", err)
+		return fmt.Errorf("no trade data: %w", err)
+	}
+	if trade == nil {
+		if cfg.Debug {
+			log.Printf("No latest trade found for %s in Redis", symbol)
+		}
+		return fmt.Errorf("no trade data available for %s", symbol)
 	}
 
-	if cfg.Debug {
-		log.Printf("Got %d historical trades for %s", len(history), symbol)
-	}
-
-	// Update metrics
+	// Update basic metrics from latest trade
 	price, _ := strconv.ParseFloat(trade.Price, 64)
 	if !m.initialized {
 		m.prevPrice = price
+		m.high24h = price
+		m.low24h = price
 		m.initialized = true
 	} else {
 		m.prevPrice = m.lastPrice
+		// Update high/low only if we don't have history
+		if m.high24h == 0 {
+			m.high24h = price
+		} else if price > m.high24h {
+			m.high24h = price
+		}
+		if m.low24h == 0 {
+			m.low24h = price
+		} else if price < m.low24h {
+			m.low24h = price
+		}
 	}
 	m.lastPrice = price
 	m.lastTradeTime = trade.Time
 
-	// Calculate metrics from history
-	var totalVolume, volumePrice float64
-	m.high24h = price // Initialize with current price
-	m.low24h = price  // Initialize with current price
-	var buyVol, sellVol float64
-	tradeCount := 0
+	// Try to get recent history (last 15 minutes for display)
+	end := time.Now()
+	start := end.Add(-15 * time.Minute)
+	history, err := store.GetTradeHistory(timeoutCtx, symbol, start, end)
+	if err != nil {
+		if cfg.Debug {
+			log.Printf("Failed to get history for %s: %v", symbol, err)
+		}
+		// Continue with partial data
+	} else if cfg.Debug {
+		log.Printf("Got %d historical trades for %s", len(history), symbol)
+	}
 
-	// Debug counters
-	buyerMakerCount := 0
-	nonBuyerMakerCount := 0
-	var lastTrades []string
+	// Calculate metrics from available history
+	var volumePrice float64
 	var totalQuantity float64
+	var buyVol, sellVol float64
+	tradeCount := len(history)
 
+	// Get running volume for 2h window
+	volumeKey := fmt.Sprintf("%s%s:volume:running", cfg.Redis.KeyPrefix, strings.ToUpper(symbol))
+	totalVolumeStr, err := store.GetRedisClient().Get(timeoutCtx, volumeKey).Result()
+	if err != nil && err != redis.Nil {
+		if cfg.Debug {
+			log.Printf("Failed to get running volume: %v", err)
+		}
+	}
+	totalVolume := 0.0
+	if totalVolumeStr != "" {
+		totalVolume, _ = strconv.ParseFloat(totalVolumeStr, 64)
+	}
+
+	// Calculate metrics from recent trades
 	for _, t := range history {
 		p, err := strconv.ParseFloat(t.Data.Price, 64)
 		if err != nil {
-			if cfg.Debug {
-				log.Printf("Failed to parse price: %v", err)
-			}
 			continue
 		}
 		q, err := strconv.ParseFloat(t.Data.Quantity, 64)
 		if err != nil {
-			if cfg.Debug {
-				log.Printf("Failed to parse quantity: %v", err)
-			}
 			continue
 		}
 
-		quoteVolume := p * q // Calculate quote volume (in USDT)
-		totalVolume += quoteVolume
-		volumePrice += p * q // For VWAP calculation
-		totalQuantity += q   // Track total quantity for VWAP
+		quoteVolume := p * q
+		volumePrice += p * q // For VWAP: Σ(price * quantity)
+		totalQuantity += q   // For VWAP: Σ(quantity)
 
+		if t.Data.IsBuyerMaker {
+			sellVol += quoteVolume
+		} else {
+			buyVol += quoteVolume
+		}
+
+		// Update high/low prices
 		if p > m.high24h {
 			m.high24h = p
 		}
-		if p < m.low24h {
+		if p < m.low24h || m.low24h == 0 {
 			m.low24h = p
 		}
-
-		// If IsBuyerMaker is true:
-		// - Buyer was the maker (placed a limit order)
-		// - Seller was the taker (placed a market order)
-		// If IsBuyerMaker is false:
-		// - Seller was the maker (placed a limit order)
-		// - Buyer was the taker (placed a market order)
-		if t.Data.IsBuyerMaker {
-			sellVol += quoteVolume // Seller was the taker (market sell)
-			buyerMakerCount++
-		} else {
-			buyVol += quoteVolume // Buyer was the taker (market buy)
-			nonBuyerMakerCount++
-		}
-		tradeCount++
-
-		// Store last few trades for debugging
-		if cfg.Debug && len(lastTrades) < 5 {
-			lastTrades = append(lastTrades, fmt.Sprintf(
-				"Time: %s, Price: %.2f, Quantity: %.8f, IsBuyerMaker: %v (Interpretation: %s)",
-				time.UnixMilli(t.Data.TradeTime).Format("15:04:05"),
-				p, q, t.Data.IsBuyerMaker,
-				interpretTrade(t.Data.IsBuyerMaker, p, q),
-			))
-		}
 	}
 
-	if cfg.Debug {
-		// Debug output
-		log.Printf("\nTrade analysis for %s:", symbol)
-		log.Printf("Total trades: %d", tradeCount)
-		log.Printf("BuyerMaker trades: %d (%.1f%%) - Trades where buyers placed limit orders and sellers executed market orders",
-			buyerMakerCount, float64(buyerMakerCount)/float64(tradeCount)*100)
-		log.Printf("NonBuyerMaker trades: %d (%.1f%%) - Trades where sellers placed limit orders and buyers executed market orders",
-			nonBuyerMakerCount, float64(nonBuyerMakerCount)/float64(tradeCount)*100)
-		log.Printf("Total volume: %.8f", totalVolume)
-		log.Printf("Market Buy volume: %.8f (%.1f%%) - Volume from market buy orders",
-			buyVol, buyVol/totalVolume*100)
-		log.Printf("Market Sell volume: %.8f (%.1f%%) - Volume from market sell orders",
-			sellVol, sellVol/totalVolume*100)
-		log.Printf("\nLast 5 trades (most recent first):")
-		for _, t := range lastTrades {
-			log.Printf("  %s", t)
-		}
+	// Calculate metrics with available data
+	recentVolume := buyVol + sellVol
+	if recentVolume > 0 {
+		m.orderImbalance = (buyVol - sellVol) / recentVolume
+		m.avgTradeSize = recentVolume / float64(tradeCount)
+		m.tradesPerMin = float64(tradeCount) / 15 // trades per minute over 15 minutes
 	}
 
-	// Calculate VWAP and trades per minute
-	if totalQuantity > 0 {
-		m.vwap = volumePrice / totalQuantity // VWAP = Σ(price * quantity) / Σ(quantity)
-	} else {
-		m.vwap = price
-	}
-	m.tradesPerMin = float64(tradeCount) / 1440 // trades per minute
-
-	// Calculate advanced metrics
-	if totalVolume > 0 {
-		// Price action metrics
-		m.priceRange = ((m.high24h - m.low24h) / m.low24h) * 100
-		m.rangePosition = ((m.lastPrice - m.low24h) / (m.high24h - m.low24h)) * 100
-		m.vwapDev = ((m.lastPrice - m.vwap) / m.vwap) * 100 // This calculation is correct, the input values were wrong
-
-		// Calculate volatility (standard deviation of returns)
-		var returns []float64
-		for i := 1; i < len(m.recentPrices); i++ {
-			ret := (m.recentPrices[i] - m.recentPrices[i-1]) / m.recentPrices[i-1]
-			returns = append(returns, ret)
-		}
-		m.volatility = calculateStdDev(returns) * 100
-
-		// Volume metrics
-		avgVolume := totalVolume / float64(tradeCount)
-		m.avgTradeSize = avgVolume
-		m.volMomentum = calculateVolumeMomentum(m.recentVolumes)
-
-		// Market microstructure
-		m.orderImbalance = (buyVol - sellVol) / totalVolume
-		m.marketImpact = math.Abs(m.lastPrice-m.prevPrice) / totalVolume
-		m.tradeAccel = calculateTradeAcceleration(m.recentTrades)
-
-		// Update historical data
-		m.recentPrices = append(m.recentPrices, m.lastPrice)
-		if len(m.recentPrices) > 100 {
-			m.recentPrices = m.recentPrices[1:]
-		}
+	// If we don't have running volume, use recent volume
+	if totalVolume == 0 {
+		totalVolume = recentVolume
 	}
 
-	// Calculate price change
-	priceChange := 0.0
-	if m.prevPrice > 0 {
-		priceChange = ((m.lastPrice - m.prevPrice) / m.prevPrice) * 100
-	}
-
-	// Calculate buy percentage
-	buyPercent := 0.0
-	if totalVolume > 0 {
-		buyPercent = (buyVol / totalVolume) * 100
-	}
-
-	// Header with symbol and timestamp
+	// Display metrics
 	fmt.Printf("─── %s %s%s %s ───\n",
 		symbol,
 		formatFloat(m.lastPrice, 2),
-		formatPriceChange(priceChange),
+		formatPriceChange(((m.lastPrice-m.prevPrice)/m.prevPrice)*100),
 		m.lastTradeTime.Format("15:04:05"))
 
-	// Price information
-	fmt.Printf("24h Range: %s - %s    VWAP: %s\n",
+	vwap := "-"
+	if totalQuantity > 0 {
+		vwap = formatFloat(volumePrice/totalQuantity, 2) // VWAP = Σ(price * quantity) / Σ(quantity)
+	}
+
+	fmt.Printf("Range: %s - %s    VWAP: %s\n",
 		formatFloat(m.low24h, 2),
 		formatFloat(m.high24h, 2),
-		formatFloat(m.vwap, 2))
+		vwap)
 
 	fmt.Println()
 
-	// Left column
-	fmt.Printf("Volume (24h):     %s USDT\n", formatVolume(totalVolume))
+	fmt.Printf("Volume (2h):      %s USDT\n", formatVolume(totalVolume))
+	buyPercent := 0.0
+	if recentVolume > 0 {
+		buyPercent = (buyVol / recentVolume) * 100
+	}
 	fmt.Printf("Buy Volume:       %.1f%%\n", buyPercent)
 	fmt.Printf("Avg Trade Size:   %s USDT\n", formatVolume(m.avgTradeSize))
 	fmt.Printf("Trades/min:       %.1f\n", m.tradesPerMin)
 
 	fmt.Println()
 
-	// Right column
+	if m.high24h > m.low24h {
+		m.priceRange = ((m.high24h - m.low24h) / m.low24h) * 100
+		m.rangePosition = ((m.lastPrice - m.low24h) / (m.high24h - m.low24h)) * 100
+	}
+
 	fmt.Printf("Price Range:      %.2f%%\n", m.priceRange)
 	fmt.Printf("Range Position:   %.1f%%\n", m.rangePosition)
-	fmt.Printf("Volatility:       %.2f%%\n", m.volatility)
-	fmt.Printf("VWAP Deviation:   %.2f%%\n", m.vwapDev)
-
-	fmt.Println()
-
-	// Market metrics
 	fmt.Printf("Order Imbalance:  %.1f%%\n", m.orderImbalance*100)
-	fmt.Printf("Market Impact:    %.6f\n", m.marketImpact)
-	fmt.Printf("Volume Momentum:  %.2f%%\n", m.volMomentum)
-	fmt.Printf("Trade Accel:      %.1f%%\n", m.tradeAccel)
 
 	fmt.Printf("%s\n\n", strings.Repeat("─", 50))
 

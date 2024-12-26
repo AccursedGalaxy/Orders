@@ -142,27 +142,22 @@ func (s *RedisStore) StoreTrade(ctx context.Context, trade *models.Trade) error 
 	quantity, _ := strconv.ParseFloat(trade.Quantity, 64)
 	tradeVolume := price * quantity
 
-	// Atomically update running volume
-	pipe := s.client.Pipeline()
-	pipe.IncrByFloat(ctx, volumeKey, tradeVolume)
-	pipe.Expire(ctx, volumeKey, 24*time.Hour)
-	if _, err := pipe.Exec(ctx); err != nil {
-		log.Printf("Warning: failed to update running volume: %v", err)
-	}
-
-	// Trigger volume update less frequently (every 5 minutes per symbol)
-	updateKey := fmt.Sprintf("%s%s:volume:last_update", s.config.Redis.KeyPrefix, strings.ToUpper(trade.Symbol))
-	needsUpdate, err := s.client.SetNX(ctx, updateKey, time.Now().Unix(), 5*time.Minute).Result()
-	if err != nil {
-		log.Printf("Warning: failed to check last update time: %v", err)
-	} else if needsUpdate {
-		go func() {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := s.Update24hVolume(ctx, trade.Symbol); err != nil && s.config.Debug {
-				log.Printf("Warning: failed to update 24h volume for %s: %v", trade.Symbol, err)
-			}
-		}()
+	// Check if we need to reset the volume (every 2 hours)
+	resetKey := fmt.Sprintf("%s%s:volume:reset_time", s.config.Redis.KeyPrefix, strings.ToUpper(trade.Symbol))
+	lastResetTime, err := s.client.Get(ctx, resetKey).Int64()
+	if err == redis.Nil || time.Now().Unix()-lastResetTime > 7200 { // 2 hours
+		// Reset volume and update reset time
+		pipe := s.client.Pipeline()
+		pipe.Set(ctx, volumeKey, fmt.Sprintf("%.8f", tradeVolume), 2*time.Hour)
+		pipe.Set(ctx, resetKey, time.Now().Unix(), 2*time.Hour)
+		if _, err := pipe.Exec(ctx); err != nil {
+			log.Printf("Warning: failed to reset volume: %v", err)
+		}
+	} else {
+		// Increment existing volume
+		if err := s.client.IncrByFloat(ctx, volumeKey, tradeVolume).Err(); err != nil {
+			log.Printf("Warning: failed to update running volume: %v", err)
+		}
 	}
 
 	return nil
@@ -261,10 +256,12 @@ func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, 
 			symbol, start.Format(time.RFC3339), end.Format(time.RFC3339), key)
 	}
 
-	// Get trades from Redis sorted set
-	trades, err := s.client.ZRangeByScore(ctx, key, &redis.ZRangeBy{
-		Min: fmt.Sprintf("%d", startMs),
-		Max: fmt.Sprintf("%d", endMs),
+	// Get most recent trades first, limited to 1000 trades
+	trades, err := s.client.ZRevRangeByScore(ctx, key, &redis.ZRangeBy{
+		Min:    fmt.Sprintf("%d", startMs),
+		Max:    fmt.Sprintf("%d", endMs),
+		Count:  1000,
+		Offset: 0,
 	}).Result()
 
 	if err != nil {
@@ -272,10 +269,12 @@ func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, 
 	}
 
 	if s.config.Debug {
-		log.Printf("Found %d trades in Redis for %s", len(trades), symbol)
+		log.Printf("Retrieved %d trades from Redis", len(trades))
 	}
 
 	events := make([]models.AggTradeEvent, 0, len(trades))
+	seenTrades := make(map[int64]bool)
+
 	for _, trade := range trades {
 		// Check if data is compressed
 		if len(trade) > 2 && trade[0] == 0x1f && trade[1] == 0x8b {
@@ -297,13 +296,7 @@ func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, 
 			trade = string(decompressed)
 		}
 
-		if s.config.Debug {
-			// Debug: Print raw trade data
-			log.Printf("Raw trade data: %s", trade)
-		}
-
 		var event models.AggTradeEvent
-		event.SetDebug(s.config.Debug)
 		if err := json.Unmarshal([]byte(trade), &event); err != nil {
 			if s.config.Debug {
 				log.Printf("Failed to unmarshal trade data: %v", err)
@@ -311,12 +304,17 @@ func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, 
 			continue
 		}
 
-		events = append(events, event)
+		// Skip duplicate trades (only keep the first occurrence)
+		if !seenTrades[event.Data.TradeID] {
+			seenTrades[event.Data.TradeID] = true
+			events = append(events, event)
+		}
 	}
 
 	if s.config.Debug {
-		log.Printf("Successfully parsed %d trades for %s", len(events), symbol)
+		log.Printf("Successfully parsed %d unique trades for %s", len(events), symbol)
 	}
+
 	return events, nil
 }
 
