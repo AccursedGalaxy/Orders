@@ -1,3 +1,15 @@
+## [1.1.8](https://github.com/AccursedGalaxy/Orders/compare/v1.1.7...v1.1.8) (2024-12-26)
+
+
+
+## [1.1.7](https://github.com/AccursedGalaxy/Orders/compare/v1.1.6...v1.1.7) (2024-12-26)
+
+
+
+## [1.1.6](https://github.com/AccursedGalaxy/Orders/compare/v1.1.5...v1.1.6) (2024-12-26)
+
+
+
 ## [1.1.5](https://github.com/AccursedGalaxy/Orders/compare/v1.1.4...v1.1.5) (2024-12-26)
 
 
@@ -39,6 +51,62 @@
 
 
 ## [1.1.1](https://github.com/AccursedGalaxy/Orders/compare/v1.1.0...v1.1.1) (2024-12-24)
+
+
+
+# [1.1.0](https://github.com/AccursedGalaxy/Orders/compare/v1.0.4...v1.1.0) (2024-12-24)
+
+
+
+## [1.0.4](https://github.com/AccursedGalaxy/Orders/compare/v1.0.3...v1.0.4) (2024-12-24)
+
+
+
+## [1.0.3](https://github.com/AccursedGalaxy/Orders/compare/v1.0.2...v1.0.3) (2024-12-24)
+
+
+
+## [1.0.2](https://github.com/AccursedGalaxy/Orders/compare/v1.0.1...v1.0.2) (2024-12-24)
+
+
+
+## [1.0.1](https://github.com/AccursedGalaxy/Orders/compare/v1.0.0...v1.0.1) (2024-12-24)
+
+
+
+# [1.0.0](https://github.com/AccursedGalaxy/Orders/compare/v0.4.0...v1.0.0) (2024-12-24)
+
+
+
+# [0.4.0](https://github.com/AccursedGalaxy/Orders/compare/v0.3.0...v0.4.0) (2024-12-24)
+
+
+
+# [0.3.0](https://github.com/AccursedGalaxy/Orders/compare/v0.2.0...v0.3.0) (2024-12-24)
+
+
+
+# [0.2.0](https://github.com/AccursedGalaxy/Orders/compare/7073e621fc07b938abe71a053a256d95ee124de8...v0.2.0) (2024-12-24)
+
+
+### Features
+
+* benchmark & CI/CD ([2a51bdf](https://github.com/AccursedGalaxy/Orders/commit/2a51bdfbbf03e5eaf39dbd05f20592e59593c765))
+* benchmark & CI/CD ([aabf46c](https://github.com/AccursedGalaxy/Orders/commit/aabf46c7594b551073529291af030838758301f0))
+* benchmark & CI/CD ([a617cfd](https://github.com/AccursedGalaxy/Orders/commit/a617cfd7bf0951a881dc9a9860c1a720fd05cb45))
+* data explore ([045cf99](https://github.com/AccursedGalaxy/Orders/commit/045cf992b6afcb658e2611d8644b8c54a9ec085c))
+* different reids urls ([cc9d60f](https://github.com/AccursedGalaxy/Orders/commit/cc9d60f61422323195a0bf932f51d7c653e30c9f))
+* ignore updates ([df7add7](https://github.com/AccursedGalaxy/Orders/commit/df7add720759fdc25ef6c6253ed25381388816f8))
+* inital setup - logging and monitoring ([7073e62](https://github.com/AccursedGalaxy/Orders/commit/7073e621fc07b938abe71a053a256d95ee124de8))
+* ready for heroku-redis ([a819974](https://github.com/AccursedGalaxy/Orders/commit/a8199746b3ace8142b9a0843636c1c1c9d961545))
+* ready for heroku-redis ([a0d6696](https://github.com/AccursedGalaxy/Orders/commit/a0d66962e61032ce4742ad1aaa20eec1ab862354))
+* ready for heroku-redis ([d955d95](https://github.com/AccursedGalaxy/Orders/commit/d955d954ac3b43c884eefa96d8a2f6dd38dc6112))
+* ready for heroku-redis ([57cb8de](https://github.com/AccursedGalaxy/Orders/commit/57cb8ded61acf34b0ac2f3f401b7cd00aeb20f9f))
+* ready for heroku-redis ([0362d19](https://github.com/AccursedGalaxy/Orders/commit/0362d19a7bebda78b2900195592657b0fd6c8798))
+* ready for heroku-redis ([ba6d825](https://github.com/AccursedGalaxy/Orders/commit/ba6d8250a368704de0e5b60a92207189518e9346))
+* redis viewer ([aba6ff4](https://github.com/AccursedGalaxy/Orders/commit/aba6ff45ceadf424157cb329b16490354c001891))
+* restructure ([7b249df](https://github.com/AccursedGalaxy/Orders/commit/7b249df817b414159e93ee1db05ae51114f73b9a))
+* restructure ([f2f2531](https://github.com/AccursedGalaxy/Orders/commit/f2f2531d68952ec9a9e81d53743ff7a2c0190091))
 
 
 
