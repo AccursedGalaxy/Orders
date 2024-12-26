@@ -77,8 +77,23 @@ jobs:
           # Get the latest version and bump it
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           LATEST_VERSION=${LATEST_TAG#v}
-          NEW_VERSION=$(echo $LATEST_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
+          
+          # Calculate new version based on existing tags
+          MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
+          MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
+          PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
+          
+          # Increment patch version
+          NEW_VERSION="$MAJOR.$MINOR.$((PATCH + 1))"
+          
+          # Verify this version doesn't exist
+          while git rev-parse "v$NEW_VERSION" >/dev/null 2>&1; do
+            PATCH=$((PATCH + 1))
+            NEW_VERSION="$MAJOR.$MINOR.$PATCH"
+          done
+          
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
           # Create a release branch
           git checkout -b release/v$NEW_VERSION
@@ -100,6 +115,7 @@ jobs:
           output-file: 'CHANGELOG.md'
           skip-version-file: true
           skip-git-pull: true
+          skip-commit: false
           git-branch: release/v${{ env.NEW_VERSION }}
           fallback-version: ${{ env.NEW_VERSION }}
           preset: 'angular'
@@ -148,5 +164,6 @@ jobs:
             bin/binance-redis-streamer-darwin-amd64.tar.gz
           draft: true
           prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
