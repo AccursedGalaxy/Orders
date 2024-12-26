@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"binance-redis-streamer/internal/models"
@@ -21,8 +22,11 @@ func NewPostgresStore() (*PostgresStore, error) {
 	// Get DATABASE_URL from environment (Heroku sets this automatically)
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
-		return nil, fmt.Errorf("database URL environment variable is not set")
+		log.Printf("Warning: DATABASE_URL environment variable is not set, using default configuration")
+		dbURL = "postgres://postgres:postgres@localhost:5432/binance_trades?sslmode=disable"
 	}
+
+	log.Printf("Attempting to connect to PostgreSQL at: %s", maskPassword(dbURL))
 
 	// Connect to PostgreSQL
 	db, err := sql.Open("postgres", dbURL)
@@ -49,7 +53,22 @@ func NewPostgresStore() (*PostgresStore, error) {
 		return nil, err
 	}
 
+	log.Printf("Successfully connected to PostgreSQL")
 	return store, nil
+}
+
+// maskPassword masks the password in the database URL for logging
+func maskPassword(dbURL string) string {
+	if strings.Contains(dbURL, "@") {
+		parts := strings.Split(dbURL, "@")
+		if len(parts) > 1 {
+			credentials := strings.Split(parts[0], ":")
+			if len(credentials) > 2 {
+				return fmt.Sprintf("%s:****@%s", credentials[0], parts[1])
+			}
+		}
+	}
+	return "postgres://****:****@host:5432/database"
 }
 
 func (s *PostgresStore) createTables() error {
@@ -69,18 +88,22 @@ func (s *PostgresStore) createTables() error {
 		CREATE INDEX IF NOT EXISTS idx_trade_candles_time 
 			ON trade_candles(timestamp);
 	`)
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to create tables: %w", err)
 	}
-	
+
 	log.Println("Successfully created/verified PostgreSQL tables")
 	return nil
 }
 
 // StoreCandleData stores 1-minute aggregated trade data
 func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, candle *models.Candle) error {
-	_, err := s.db.ExecContext(ctx, `
+	log.Printf("Storing candle data for %s at %s: open=%s, close=%s, volume=%s",
+		symbol, candle.Timestamp.Format(time.RFC3339),
+		candle.OpenPrice, candle.ClosePrice, candle.Volume)
+
+	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO trade_candles (
 			symbol, timestamp, open_price, high_price, low_price, 
 			close_price, volume, trade_count
@@ -96,12 +119,68 @@ func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, cand
 		candle.HighPrice, candle.LowPrice, candle.ClosePrice,
 		candle.Volume, candle.TradeCount,
 	)
-	return err
+
+	if err != nil {
+		return fmt.Errorf("failed to store candle data: %w", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		log.Printf("Warning: couldn't get rows affected: %v", err)
+	} else {
+		log.Printf("Stored candle data for %s at %s: %d rows affected",
+			symbol, candle.Timestamp.Format(time.RFC3339), rowsAffected)
+	}
+
+	return nil
 }
 
 // GetHistoricalCandles retrieves historical candle data
 func (s *PostgresStore) GetHistoricalCandles(ctx context.Context, symbol string, start, end time.Time) ([]*models.Candle, error) {
+	log.Printf("Fetching historical candles for %s from %s to %s",
+		symbol, start.Format(time.RFC3339), end.Format(time.RFC3339))
+
+	// First, check if any data exists
+	var count int
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM trade_candles 
+		WHERE symbol = $1 AND timestamp BETWEEN $2 AND $3`,
+		symbol, start, end,
+	).Scan(&count)
+
+	if err != nil {
+		log.Printf("Error checking candle count: %v", err)
+	} else {
+		log.Printf("Found %d candles in the specified time range", count)
+	}
+
+	// Debug: Check all candles in the table
 	rows, err := s.db.QueryContext(ctx, `
+		SELECT symbol, timestamp, open_price, close_price, volume, trade_count
+		FROM trade_candles
+		ORDER BY timestamp DESC
+		LIMIT 5`,
+	)
+	if err != nil {
+		log.Printf("Error checking recent candles: %v", err)
+	} else {
+		defer rows.Close()
+		for rows.Next() {
+			var symbol string
+			var timestamp time.Time
+			var openPrice, closePrice, volume string
+			var tradeCount int64
+			if err := rows.Scan(&symbol, &timestamp, &openPrice, &closePrice, &volume, &tradeCount); err != nil {
+				log.Printf("Error scanning candle: %v", err)
+				continue
+			}
+			log.Printf("Found candle: symbol=%s, time=%s, open=%s, close=%s, volume=%s, trades=%d",
+				symbol, timestamp.Format(time.RFC3339), openPrice, closePrice, volume, tradeCount)
+		}
+	}
+
+	// Get candles for the specified time range
+	rows, err = s.db.QueryContext(ctx, `
 		SELECT timestamp, open_price, high_price, low_price, 
 			   close_price, volume, trade_count
 		FROM trade_candles
@@ -110,7 +189,7 @@ func (s *PostgresStore) GetHistoricalCandles(ctx context.Context, symbol string,
 		symbol, start, end,
 	)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to query historical candles: %w", err)
 	}
 	defer rows.Close()
 
@@ -123,11 +202,15 @@ func (s *PostgresStore) GetHistoricalCandles(ctx context.Context, symbol string,
 			&candle.TradeCount,
 		)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("failed to scan candle data: %w", err)
 		}
 		candles = append(candles, candle)
+		log.Printf("Retrieved candle for %s at %s: open=%s, close=%s, volume=%s",
+			symbol, candle.Timestamp.Format(time.RFC3339),
+			candle.OpenPrice, candle.ClosePrice, candle.Volume)
 	}
 
+	log.Printf("Found %d historical candles for %s", len(candles), symbol)
 	return candles, rows.Err()
 }
 
@@ -178,4 +261,4 @@ func (s *PostgresStore) Close() error {
 // Vacuum optimizes the database (not needed for PostgreSQL/TimescaleDB)
 func (s *PostgresStore) Vacuum() error {
 	return nil
-} 
+}

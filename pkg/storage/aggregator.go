@@ -32,8 +32,11 @@ func NewTradeAggregator(redisStore *RedisStore, postgresStore *PostgresStore) *T
 
 // Start starts the aggregation process
 func (a *TradeAggregator) Start(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Minute)
+	// Flush candles every 10 seconds instead of every minute
+	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
+
+	log.Printf("Starting trade aggregator with 10-second flush interval")
 
 	go func() {
 		for {
@@ -60,14 +63,18 @@ func (a *TradeAggregator) ProcessTrade(ctx context.Context, trade *models.Trade)
 	defer a.candleMu.Unlock()
 
 	// Create candle key (symbol + minute timestamp)
-	candleTime := time.Unix(0, trade.Time).Truncate(time.Minute)
-	key := fmt.Sprintf("%s:%d", trade.Symbol, candleTime.Unix())
+	candleTime := trade.Time.Truncate(time.Minute)
+	key := fmt.Sprintf("%s:%s", trade.Symbol, candleTime.Format(time.RFC3339))
+
+	log.Printf("Processing trade for %s at %s: price=%s, quantity=%s",
+		trade.Symbol, candleTime.Format(time.RFC3339), trade.Price, trade.Quantity)
 
 	// Get or create candle
 	candle, exists := a.candles[key]
 	if !exists {
 		candle = models.NewCandle(candleTime)
 		a.candles[key] = candle
+		log.Printf("Created new candle for %s at %s", trade.Symbol, candleTime.Format(time.RFC3339))
 	}
 	candle.UpdateFromTrade(trade)
 
@@ -79,17 +86,29 @@ func (a *TradeAggregator) flushCandles(ctx context.Context) error {
 	a.candleMu.Lock()
 	defer a.candleMu.Unlock()
 
+	log.Printf("Starting candle flush, current count: %d", len(a.candles))
 	currentMinute := time.Now().Truncate(time.Minute)
+	flushedCount := 0
+
 	for key, candle := range a.candles {
-		// Only flush candles from previous minutes
+		// Only flush candles that are complete (from previous minutes)
 		if candle.Timestamp.Before(currentMinute) {
-			symbol := key[:strings.Index(key, ":")]
+			symbol := strings.Split(key, ":")[0]
+			log.Printf("Flushing candle for %s at %s: open=%s, close=%s, volume=%s",
+				symbol, candle.Timestamp.Format(time.RFC3339),
+				candle.OpenPrice, candle.ClosePrice, candle.Volume)
+
 			if err := a.postgresStore.StoreCandleData(ctx, symbol, candle); err != nil {
-				return fmt.Errorf("failed to store candle data: %w", err)
+				log.Printf("Failed to store candle data: %v", err)
+				continue
 			}
 			delete(a.candles, key)
+			flushedCount++
 		}
 	}
+
+	log.Printf("Flush complete: flushed %d candles, %d remaining in memory",
+		flushedCount, len(a.candles))
 
 	return nil
 }
@@ -126,7 +145,7 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 		// Get trades older than 2 hours
 		end := time.Now().Add(-2 * time.Hour)
 		start := end.Add(-22 * time.Hour) // Get the previous 22 hours of data
-		
+
 		trades, err := a.redisStore.GetTradeHistory(ctx, symbol, start, end)
 		if err != nil {
 			log.Printf("Error getting trade history for %s: %v", symbol, err)
@@ -137,7 +156,7 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 		candleMap := make(map[time.Time]*models.Candle)
 		for _, trade := range trades {
 			tradeTime := time.Unix(0, trade.Data.TradeTime).Truncate(time.Minute)
-			
+
 			if candle, exists := candleMap[tradeTime]; exists {
 				candle.UpdateFromTrade(trade.Data.ToTrade())
 			} else {

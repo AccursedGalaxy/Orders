@@ -15,7 +15,6 @@ import (
 	"binance-redis-streamer/pkg/binance"
 	"binance-redis-streamer/pkg/config"
 	"binance-redis-streamer/pkg/ingestion"
-	"binance-redis-streamer/pkg/messaging"
 	"binance-redis-streamer/pkg/metrics"
 	"binance-redis-streamer/pkg/processor"
 	"binance-redis-streamer/pkg/storage"
@@ -37,10 +36,6 @@ func main() {
 	}
 	defer redisStore.Close()
 
-	// Create message bus using Redis
-	messageBus := messaging.NewRedisBus(redisStore.GetRedisClient())
-	defer messageBus.Close()
-
 	// Create PostgreSQL store
 	postgresStore, err := storage.NewPostgresStore()
 	if err != nil {
@@ -58,10 +53,10 @@ func main() {
 	client := binance.NewClient(cfg, redisStore)
 
 	// Create ingestion service
-	ingestService := ingestion.NewService(cfg, client, messageBus)
+	ingestService := ingestion.NewService(cfg, client, redisStore)
 
 	// Create processor service
-	processService := processor.NewService(cfg, messageBus, redisStore, aggregator)
+	processService := processor.NewService(cfg, redisStore, aggregator)
 
 	// Set up context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
@@ -100,7 +95,7 @@ func main() {
 	// Stop services
 	processService.Stop()
 	ingestService.Stop()
-	
+
 	// Allow some time for cleanup
 	time.Sleep(5 * time.Second)
 }
@@ -122,4 +117,4 @@ func loadConfig() *config.Config {
 	}
 
 	return cfg
-} 
+}

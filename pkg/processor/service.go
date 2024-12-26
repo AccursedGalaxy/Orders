@@ -14,29 +14,28 @@ import (
 
 // Service handles the processing of trade data
 type Service struct {
-	config      *config.Config
-	messageBus  messaging.MessageBus
-	redisStore  *storage.RedisStore
-	aggregator  *storage.TradeAggregator
-	workerPool  chan struct{}
-	stopCh      chan struct{}
-	wg          sync.WaitGroup
+	config     *config.Config
+	messageBus messaging.MessageBus
+	redisStore *storage.RedisStore
+	aggregator *storage.TradeAggregator
+	workerPool chan struct{}
+	stopCh     chan struct{}
+	wg         sync.WaitGroup
 }
 
 // NewService creates a new processor service
 func NewService(
 	cfg *config.Config,
-	messageBus messaging.MessageBus,
-	redisStore *storage.RedisStore,
+	store *storage.RedisStore,
 	aggregator *storage.TradeAggregator,
 ) *Service {
 	return &Service{
-		config:      cfg,
-		messageBus:  messageBus,
-		redisStore:  redisStore,
-		aggregator:  aggregator,
-		workerPool:  make(chan struct{}, 100), // Limit concurrent processing
-		stopCh:      make(chan struct{}),
+		config:     cfg,
+		messageBus: messaging.NewRedisPubSub(store.GetRedisClient()),
+		redisStore: store,
+		aggregator: aggregator,
+		workerPool: make(chan struct{}, 100), // Limit concurrent processing
+		stopCh:     make(chan struct{}),
 	}
 }
 
@@ -62,6 +61,9 @@ func (s *Service) handleTrade(trade *models.AggTradeEvent) error {
 		return fmt.Errorf("service is stopping")
 	}
 
+	log.Printf("Received trade event for %s: price=%s, quantity=%s",
+		trade.Data.Symbol, trade.Data.Price, trade.Data.Quantity)
+
 	// Convert to trade model
 	processedTrade := trade.ToTrade()
 
@@ -78,6 +80,8 @@ func (s *Service) handleTrade(trade *models.AggTradeEvent) error {
 	// Process through aggregator
 	if err := s.aggregator.ProcessTrade(context.Background(), processedTrade); err != nil {
 		log.Printf("Failed to process trade through aggregator: %v", err)
+	} else {
+		log.Printf("Successfully processed trade through aggregator for %s", processedTrade.Symbol)
 	}
 
 	return nil
@@ -87,4 +91,4 @@ func (s *Service) handleTrade(trade *models.AggTradeEvent) error {
 func (s *Service) Stop() {
 	close(s.stopCh)
 	s.wg.Wait()
-} 
+}

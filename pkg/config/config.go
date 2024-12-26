@@ -7,12 +7,12 @@ import (
 	"time"
 )
 
-// Config holds all configuration for the application
+// Config represents the application configuration
 type Config struct {
 	Redis     RedisConfig
 	Binance   BinanceConfig
 	WebSocket WebSocketConfig
-	NATS      NATSConfig
+	Debug     bool
 }
 
 // RedisConfig holds Redis-specific configuration
@@ -28,13 +28,13 @@ type RedisConfig struct {
 
 // BinanceConfig holds Binance-specific configuration
 type BinanceConfig struct {
-	BaseURL            string
-	MaxStreamsPerConn  int
-	HistorySize        int64
+	BaseURL           string
+	MaxStreamsPerConn int
+	HistorySize       int64
 	// New fields for symbol filtering
-	MainSymbols        []string // Priority symbols to track (e.g., ["BTCUSDT", "ETHUSDT"])
-	MaxSymbols         int      // Maximum number of symbols to track (0 for unlimited)
-	MinDailyVolume     float64  // Minimum 24h volume to track a symbol (0 for unlimited)
+	MainSymbols    []string // Priority symbols to track (e.g., ["BTCUSDT", "ETHUSDT"])
+	MaxSymbols     int      // Maximum number of symbols to track (0 for unlimited)
+	MinDailyVolume float64  // Minimum 24h volume to track a symbol (0 for unlimited)
 }
 
 // WebSocketConfig holds WebSocket-specific configuration
@@ -43,43 +43,29 @@ type WebSocketConfig struct {
 	PingInterval   time.Duration
 }
 
-// NATSConfig holds NATS-specific configuration
-type NATSConfig struct {
-	URL            string
-	MaxReconnects  int
-	ReconnectWait  time.Duration
-	ConnectTimeout time.Duration
-}
-
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
 		Redis: RedisConfig{
-			URL:             getRedisURL(),
+			URL:             "redis://localhost:6379/0",
 			RetentionPeriod: 24 * time.Hour,
 			CleanupInterval: 1 * time.Hour,
 			KeyPrefix:       "binance:",
-			UseCompression:  true,
-			MaxTradesPerKey: 1000000, // Limit history per symbol
+
+			MaxTradesPerKey: 10000,
 		},
 		Binance: BinanceConfig{
 			BaseURL:           "https://api.binance.com",
-			MaxStreamsPerConn: 200,
-			HistorySize:       10000,
-			MainSymbols:       []string{"BTCUSDT", "ETHUSDT", "BNBUSDT"},
-			MaxSymbols:        5,                                                     // Limit total symbols
-			MinDailyVolume:    1000000.0,                                             // $1M daily volume minimum
+			MaxSymbols:        10,
+			MaxStreamsPerConn: 1000,
+			MinDailyVolume:    1000000, // 1M USDT
+			MainSymbols:       []string{"BTCUSDT", "ETHUSDT"},
 		},
 		WebSocket: WebSocketConfig{
+			PingInterval:   time.Minute,
 			ReconnectDelay: 5 * time.Second,
-			PingInterval:   5 * time.Second,
 		},
-		NATS: NATSConfig{
-			URL:            getNATSURL(),
-			MaxReconnects:  60,
-			ReconnectWait:  2 * time.Second,
-			ConnectTimeout: 10 * time.Second,
-		},
+		Debug: false,
 	}
 }
 
@@ -105,19 +91,6 @@ func getRedisURL() string {
 	return defaultURL
 }
 
-// getNATSURL returns the NATS URL based on the environment
-func getNATSURL() string {
-	url := os.Getenv("NATS_URL")
-	if url != "" {
-		log.Printf("Using NATS URL from environment: %s", url)
-		return url
-	}
-
-	defaultURL := "nats://localhost:4222"
-	log.Printf("No NATS URL found in environment, using default: %s", defaultURL)
-	return defaultURL
-}
-
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
 	if c.Redis.RetentionPeriod <= 0 {
@@ -130,4 +103,4 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("max trades per key must be non-negative")
 	}
 	return nil
-} 
+}

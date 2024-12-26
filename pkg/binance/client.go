@@ -21,12 +21,13 @@ import (
 
 // Client represents a Binance WebSocket client
 type Client struct {
-	config     *config.Config
-	store      storage.TradeStore
-	baseURL    string
-	wsConn     *websocket.Conn
-	mu         sync.RWMutex
-	isTest     bool
+	config  *config.Config
+	store   storage.TradeStore
+	baseURL string
+	wsConn  *websocket.Conn
+	mu      sync.RWMutex
+	isTest  bool
+	debug   bool
 }
 
 // NewClient creates a new Binance client
@@ -35,6 +36,7 @@ func NewClient(cfg *config.Config, store storage.TradeStore) *Client {
 		config:  cfg,
 		store:   store,
 		baseURL: cfg.Binance.BaseURL,
+		debug:   cfg.Debug,
 	}
 }
 
@@ -45,20 +47,25 @@ func NewTestClient(cfg *config.Config, store storage.TradeStore) *Client {
 		store:   store,
 		baseURL: cfg.Binance.BaseURL,
 		isTest:  true,
+		debug:   cfg.Debug,
 	}
 }
 
 // GetSymbols fetches all available symbols from Binance
 func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
-	log.Println("Fetching symbols from Binance...")
-	
+	if c.debug {
+		log.Println("Fetching symbols from Binance...")
+	}
+
 	// If main symbols are configured and no additional symbols are allowed
 	if len(c.config.Binance.MainSymbols) > 0 && c.config.Binance.MaxSymbols <= len(c.config.Binance.MainSymbols) {
 		symbols := make([]string, len(c.config.Binance.MainSymbols))
 		for i, s := range c.config.Binance.MainSymbols {
 			symbols[i] = strings.ToLower(s)
 		}
-		log.Printf("Using configured main symbols only: %v", symbols)
+		if c.debug {
+			log.Printf("Using configured main symbols only: %v", symbols)
+		}
 		return symbols, nil
 	}
 
@@ -120,8 +127,10 @@ func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
 	if len(symbols) == 0 {
 		return nil, fmt.Errorf("no trading pairs found")
 	}
-	
-	log.Printf("Selected %d trading pairs", len(symbols))
+
+	if c.debug {
+		log.Printf("Selected %d trading pairs", len(symbols))
+	}
 	return symbols, nil
 }
 
@@ -142,7 +151,7 @@ func (c *Client) fetchExchangeInfo(ctx context.Context, url string) (*models.Exc
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %w", err)
 	}
-	
+
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
@@ -158,7 +167,7 @@ func (c *Client) fetchExchangeInfo(ctx context.Context, url string) (*models.Exc
 // fetch24hVolume fetches 24h volume data for all symbols
 func (c *Client) fetch24hVolume(ctx context.Context) (map[string]float64, error) {
 	url := fmt.Sprintf("%s/api/v3/ticker/24hr", c.config.Binance.BaseURL)
-	
+
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -171,8 +180,8 @@ func (c *Client) fetch24hVolume(ctx context.Context) (map[string]float64, error)
 	defer resp.Body.Close()
 
 	var tickers []struct {
-		Symbol        string `json:"symbol"`
-		QuoteVolume   string `json:"quoteVolume"`
+		Symbol      string `json:"symbol"`
+		QuoteVolume string `json:"quoteVolume"`
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&tickers); err != nil {
@@ -253,7 +262,9 @@ func (c *Client) StreamTrades(ctx context.Context) error {
 
 func (c *Client) handleSymbolGroup(ctx context.Context, symbols []string) error {
 	url := c.buildStreamURL(symbols)
-	log.Printf("Connecting to stream URL for %d symbols", len(symbols))
+	if c.debug {
+		log.Printf("Connecting to stream URL for %d symbols", len(symbols))
+	}
 
 	for {
 		select {
@@ -261,7 +272,9 @@ func (c *Client) handleSymbolGroup(ctx context.Context, symbols []string) error 
 			return ctx.Err()
 		default:
 			if err := c.connectAndStream(ctx, url); err != nil {
-				log.Printf("Stream error: %v, reconnecting...", err)
+				if c.debug {
+					log.Printf("Stream error: %v, reconnecting...", err)
+				}
 				continue
 			}
 		}
@@ -271,7 +284,7 @@ func (c *Client) handleSymbolGroup(ctx context.Context, symbols []string) error 
 func (c *Client) buildStreamURL(symbols []string) string {
 	var streams []string
 	for _, symbol := range symbols {
-		streams = append(streams, fmt.Sprintf("%s@aggTrade", symbol))
+		streams = append(streams, fmt.Sprintf("%s@trade", symbol))
 	}
 	return fmt.Sprintf("wss://stream.binance.com:9443/stream?streams=%s", strings.Join(streams, "/"))
 }
@@ -322,13 +335,24 @@ func (c *Client) handlePing(ctx context.Context, conn *websocket.Conn) {
 }
 
 func (c *Client) processMessage(ctx context.Context, message []byte) error {
+	if c.debug {
+		// Debug: Print raw message
+		log.Printf("Raw WebSocket message: %s", string(message))
+	}
+
 	var event models.AggTradeEvent
 	if err := json.Unmarshal(message, &event); err != nil {
 		return fmt.Errorf("failed to unmarshal message: %w", err)
 	}
 
+	if c.debug {
+		// Debug: Print unmarshaled event
+		log.Printf("Unmarshaled event: stream=%s, symbol=%s, IsBuyerMaker=%v",
+			event.Stream, event.Data.Symbol, event.Data.IsBuyerMaker)
+	}
+
 	trade := event.ToTrade()
-	
+
 	// Store processed trade
 	if err := c.store.StoreTrade(ctx, trade); err != nil {
 		return fmt.Errorf("failed to store trade: %w", err)
@@ -339,20 +363,20 @@ func (c *Client) processMessage(ctx context.Context, message []byte) error {
 		return fmt.Errorf("failed to store raw trade: %w", err)
 	}
 
-	// Only log in non-test mode
-	if !c.isTest {
-		log.Printf("Processed trade for %s: price=%s, quantity=%s",
-			trade.Symbol, trade.Price, trade.Quantity)
+	// Only log in non-test mode and debug mode
+	if !c.isTest && c.debug {
+		log.Printf("Processed trade for %s: price=%s, quantity=%s, IsBuyerMaker=%v",
+			trade.Symbol, trade.Price, trade.Quantity, trade.IsBuyerMaker)
 	}
 
 	return nil
 }
 
-// buildStreamURL builds the WebSocket stream URL for the given symbols
+// BuildStreamURL builds the WebSocket stream URL for the given symbols
 func (c *Client) BuildStreamURL(symbols []string) string {
 	var streams []string
 	for _, symbol := range symbols {
-		streams = append(streams, fmt.Sprintf("%s@aggTrade", symbol))
+		streams = append(streams, fmt.Sprintf("%s@trade", symbol))
 	}
 	return fmt.Sprintf("wss://stream.binance.com:9443/stream?streams=%s", strings.Join(streams, "/"))
-} 
+}

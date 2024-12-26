@@ -1,24 +1,17 @@
-# Binance Trade Streamer
+# Binance Trade Data Streamer
 
-A Go application that streams trade data from Binance, stores recent data in Redis, and archives historical data in PostgreSQL with time-series optimization.
+A real-time cryptocurrency trade data streaming application that collects and processes trade data from Binance.
 
 ## Features
 
-- Real-time trade streaming for major cryptocurrency pairs
-- Redis-based hot storage for recent trades (2 hours)
-- PostgreSQL/TimescaleDB for historical data storage
-- Automatic data aggregation into 1-minute candles
-- Configurable symbol selection and data retention
-- Metrics collection and monitoring
+- Real-time trade data streaming from Binance WebSocket API
+- Multi-layer storage (Redis for recent data, PostgreSQL for historical)
+- Trade data aggregation into candles (1-minute intervals)
+- Interactive CLI interface for data exploration
+- Real-time and historical data visualization
+- Configurable symbol selection and filtering
 
-## Requirements
-
-- Go 1.21 or later
-- Redis 6.x or later
-- PostgreSQL 12.x or later with TimescaleDB extension
-- Heroku CLI (for deployment)
-
-## Local Setup
+## Installation
 
 1. Clone the repository:
 ```bash
@@ -31,88 +24,119 @@ cd binance-redis-streamer
 go mod download
 ```
 
-3. Copy the environment template:
-```bash
-cp .env.example .env
-```
-
-4. Set up local databases:
-```bash
-# Start Redis
-docker run -d -p 6379:6379 redis:6
-
-# Start PostgreSQL with TimescaleDB
-docker run -d -p 5432:5432 \
-  -e POSTGRES_PASSWORD=password \
-  -e POSTGRES_DB=binance_trades \
-  timescale/timescaledb:latest-pg12
-```
-
-5. Build and run:
+3. Build the application:
 ```bash
 go build -o bin/streamer cmd/streamer/main.go
-./bin/streamer
-```
-
-## Heroku Deployment
-
-1. Create a new Heroku app:
-```bash
-heroku create your-app-name
-```
-
-2. Add required add-ons:
-```bash
-heroku addons:create heroku-redis:hobby-dev
-heroku addons:create timescale
-```
-
-3. Configure environment variables:
-```bash
-heroku config:set MAX_SYMBOLS=3
-heroku config:set RETENTION_DAYS=90
-```
-
-4. Deploy:
-```bash
-git push heroku main
-```
-
-5. Start the worker:
-```bash
-heroku ps:scale worker=1
+go build -o bin/binance-cli cmd/cli/main.go
 ```
 
 ## Configuration
 
-The application can be configured through environment variables:
+The application can be configured using environment variables or a `.env` file:
 
-- `REDIS_URL`: Redis connection URL (set by Heroku Redis)
-- `DATABASE_URL`: PostgreSQL connection URL (set by TimescaleDB)
-- `MAX_SYMBOLS`: Maximum number of symbols to track (default: 3)
-- `RETENTION_DAYS`: Days to keep historical data (default: 90)
-- `LOG_LEVEL`: Logging level (default: info)
+```env
+REDIS_URL=redis://localhost:6379/0
+DATABASE_URL=postgres://user:password@localhost:5432/dbname
+MAX_SYMBOLS=10
+RETENTION_DAYS=7
+```
+
+## Usage
+
+### Start the Streamer
+
+```bash
+./bin/streamer
+```
+
+### CLI Commands
+
+1. Watch real-time trade data:
+```bash
+binance-cli watch BTCUSDT ETHUSDT
+binance-cli watch --interval 2  # Update every 2 seconds
+```
+
+2. View trade statistics:
+```bash
+binance-cli stats BTCUSDT --period 1h
+binance-cli stats --period 24h  # All symbols
+```
+
+3. View interactive charts:
+```bash
+binance-cli chart BTCUSDT --period 24h
+binance-cli chart ETHUSDT --period 7d --port 8081
+```
+
+4. View historical data:
+```bash
+binance-cli history BTCUSDT --period 24h --interval 5m
+binance-cli history BTCUSDT --format csv > btc_history.csv
+```
+
+5. List available trading pairs:
+```bash
+binance-cli symbols
+binance-cli symbols --format json
+```
+
+## CLI Options
+
+### Global Options
+- `--help`: Show help for any command
+
+### Watch Command
+- `-i, --interval`: Update interval in seconds (default: 1)
+
+### Stats Command
+- `-p, --period`: Time period (e.g., 1h, 24h, 7d)
+
+### Chart Command
+- `-p, --period`: Time period (e.g., 1h, 24h, 7d)
+- `--port`: Port for web interface (default: 8080)
+
+### History Command
+- `-p, --period`: Time period (e.g., 1h, 24h, 7d)
+- `-i, --interval`: Time interval (e.g., 1m, 5m, 1h)
+- `-l, --limit`: Limit number of results
+- `-f, --format`: Output format (table or csv)
+
+### Symbols Command
+- `-f, --format`: Output format (table, simple, or json)
 
 ## Architecture
 
-1. **Data Flow**:
-   - Binance WebSocket → Redis (recent trades)
-   - Redis → PostgreSQL (historical aggregation)
-   - PostgreSQL TimescaleDB (time-series storage)
+The application consists of several components:
 
-2. **Storage Strategy**:
-   - Redis: Last 2 hours of raw trade data
-   - PostgreSQL: 1-minute candles with 90-day retention
-   - TimescaleDB: Automatic partitioning and optimization
+1. **Data Ingestion**
+   - Connects to Binance WebSocket API
+   - Processes real-time trade events
+   - Publishes to message bus
 
-## Monitoring
+2. **Storage Layer**
+   - Redis for recent trade data
+   - PostgreSQL for historical data
+   - Automatic data migration
 
-The application exports metrics for:
-- Trade volume per symbol
-- Trade count per minute
-- Storage usage
-- Connection status
+3. **Processing Layer**
+   - Aggregates trades into candles
+   - Calculates statistics
+   - Manages data retention
+
+4. **CLI Interface**
+   - Real-time data monitoring
+   - Historical data analysis
+   - Interactive visualizations
+
+## Contributing
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
 ## License
 
-MIT License
+This project is licensed under the MIT License - see the LICENSE file for details.

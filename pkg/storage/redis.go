@@ -34,17 +34,23 @@ type RedisStore struct {
 
 // NewRedisStore creates a new Redis store
 func NewRedisStore(cfg *config.Config) (*RedisStore, error) {
-	log.Printf("Attempting to connect to Redis at URL: %s", cfg.Redis.URL)
-	
+	if cfg.Debug {
+		log.Printf("Attempting to connect to Redis at URL: %s", cfg.Redis.URL)
+	}
+
 	opt, err := redis.ParseURL(cfg.Redis.URL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse Redis URL: %w", err)
 	}
-	log.Printf("Parsed Redis options: addr=%s db=%d", opt.Addr, opt.DB)
+	if cfg.Debug {
+		log.Printf("Parsed Redis options: addr=%s db=%d", opt.Addr, opt.DB)
+	}
 
 	// Configure TLS for Heroku Redis
 	if opt.TLSConfig != nil {
-		log.Printf("Configuring TLS for Redis connection")
+		if cfg.Debug {
+			log.Printf("Configuring TLS for Redis connection")
+		}
 		opt.TLSConfig.InsecureSkipVerify = true
 	}
 
@@ -52,7 +58,9 @@ func NewRedisStore(cfg *config.Config) (*RedisStore, error) {
 	if err := client.Ping(context.Background()).Err(); err != nil {
 		return nil, fmt.Errorf("failed to connect to Redis: %w", err)
 	}
-	log.Printf("Successfully connected to Redis at %s", cfg.Redis.URL)
+	if cfg.Debug {
+		log.Printf("Successfully connected to Redis at %s", cfg.Redis.URL)
+	}
 
 	return &RedisStore{
 		client: client,
@@ -72,14 +80,14 @@ func (s *RedisStore) Close() error {
 
 // StoreTrade stores a trade in Redis
 func (s *RedisStore) StoreTrade(ctx context.Context, trade *models.Trade) error {
-	// Add symbol to set of tracked symbols
+	// Add symbol to tracked symbols set
 	symbolsKey := fmt.Sprintf("%ssymbols", s.config.Redis.KeyPrefix)
-	if err := s.client.SAdd(ctx, symbolsKey, trade.Symbol).Err(); err != nil {
+	if err := s.client.SAdd(ctx, symbolsKey, strings.ToUpper(trade.Symbol)).Err(); err != nil {
 		return fmt.Errorf("failed to add symbol to set: %w", err)
 	}
 
 	// Store latest trade
-	latestKey := fmt.Sprintf("%saggTrade:%s:latest", s.config.Redis.KeyPrefix, trade.Symbol)
+	latestKey := fmt.Sprintf("%strade:%s:latest", s.config.Redis.KeyPrefix, strings.ToUpper(trade.Symbol))
 	data, err := json.Marshal(trade)
 	if err != nil {
 		return fmt.Errorf("failed to marshal trade: %w", err)
@@ -94,9 +102,13 @@ func (s *RedisStore) StoreTrade(ctx context.Context, trade *models.Trade) error 
 
 // StoreRawTrade stores a raw trade event in Redis
 func (s *RedisStore) StoreRawTrade(ctx context.Context, symbol string, data []byte) error {
-	// Store in sorted set by timestamp
-	historyKey := fmt.Sprintf("%saggTrade:%s:history", s.config.Redis.KeyPrefix, symbol)
-	
+	historyKey := fmt.Sprintf("%strade:%s:history", s.config.Redis.KeyPrefix, strings.ToUpper(symbol))
+
+	if s.config.Debug {
+		// Debug: Print raw trade data being stored
+		log.Printf("Storing raw trade data for %s: %s", symbol, string(data))
+	}
+
 	// Parse event to get timestamp for score
 	var event struct {
 		Data struct {
@@ -107,17 +119,24 @@ func (s *RedisStore) StoreRawTrade(ctx context.Context, symbol string, data []by
 		return fmt.Errorf("failed to parse trade time: %w", err)
 	}
 
-	// Add to sorted set with score as timestamp
+	// Add to sorted set with score as timestamp in milliseconds
 	if err := s.client.ZAdd(ctx, historyKey, &redis.Z{
-		Score:  float64(event.Data.TradeTime),
+		Score:  float64(event.Data.TradeTime), // TradeTime is already in milliseconds
 		Member: data,
 	}).Err(); err != nil {
 		return fmt.Errorf("failed to store trade history: %w", err)
 	}
 
+	if s.config.Debug {
+		// Debug: Print stored trade data
+		log.Printf("Successfully stored trade data for %s with timestamp %d", symbol, event.Data.TradeTime)
+	}
+
 	// Trim old trades
 	if err := s.trimHistory(ctx, historyKey); err != nil {
-		log.Printf("Warning: failed to trim history: %v", err)
+		if s.config.Debug {
+			log.Printf("Warning: failed to trim history: %v", err)
+		}
 	}
 
 	return nil
@@ -125,9 +144,9 @@ func (s *RedisStore) StoreRawTrade(ctx context.Context, symbol string, data []by
 
 // trimHistory removes old trades from history
 func (s *RedisStore) trimHistory(ctx context.Context, key string) error {
-	// Remove trades older than retention period
-	oldestTime := time.Now().Add(-s.config.Redis.RetentionPeriod).UnixNano()
-	
+	// Remove trades older than retention period (convert to milliseconds)
+	oldestTime := time.Now().Add(-s.config.Redis.RetentionPeriod).UnixMilli()
+
 	if err := s.client.ZRemRangeByScore(ctx, key, "-inf", fmt.Sprintf("%d", oldestTime)).Err(); err != nil {
 		return fmt.Errorf("failed to trim history: %w", err)
 	}
@@ -144,28 +163,13 @@ func (s *RedisStore) trimHistory(ctx context.Context, key string) error {
 
 // GetLatestTrade gets the latest trade for a symbol
 func (s *RedisStore) GetLatestTrade(ctx context.Context, symbol string) (*models.Trade, error) {
-	key := fmt.Sprintf("%saggTrade:%s:latest", s.config.Redis.KeyPrefix, symbol)
+	key := fmt.Sprintf("%strade:%s:latest", s.config.Redis.KeyPrefix, strings.ToUpper(symbol))
 	data, err := s.client.Get(ctx, key).Result()
 	if err == redis.Nil {
 		return nil, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get latest trade: %w", err)
-	}
-
-	// Check if data is compressed (starts with gzip magic number \x1f\x8b)
-	if len(data) > 2 && data[0] == 0x1f && data[1] == 0x8b {
-		reader, err := gzip.NewReader(strings.NewReader(data))
-		if err != nil {
-			return nil, fmt.Errorf("failed to create gzip reader: %w", err)
-		}
-		defer reader.Close()
-
-		decompressed, err := io.ReadAll(reader)
-		if err != nil {
-			return nil, fmt.Errorf("failed to decompress data: %w", err)
-		}
-		data = string(decompressed)
 	}
 
 	var trade models.Trade
@@ -178,16 +182,29 @@ func (s *RedisStore) GetLatestTrade(ctx context.Context, symbol string) (*models
 
 // GetTradeHistory gets historical trades for a symbol within a time range
 func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, end time.Time) ([]models.AggTradeEvent, error) {
-	key := fmt.Sprintf("%saggTrade:%s:history", s.config.Redis.KeyPrefix, symbol)
-	
+	key := fmt.Sprintf("%strade:%s:history", s.config.Redis.KeyPrefix, strings.ToUpper(symbol))
+
+	// Convert timestamps to milliseconds for Redis score
+	startMs := start.UnixMilli()
+	endMs := end.UnixMilli()
+
+	if s.config.Debug {
+		log.Printf("Fetching trade history for %s from %s to %s (key: %s)",
+			symbol, start.Format(time.RFC3339), end.Format(time.RFC3339), key)
+	}
+
 	// Get trades from Redis sorted set
 	trades, err := s.client.ZRangeByScore(ctx, key, &redis.ZRangeBy{
-		Min: fmt.Sprintf("%d", start.UnixNano()),
-		Max: fmt.Sprintf("%d", end.UnixNano()),
+		Min: fmt.Sprintf("%d", startMs),
+		Max: fmt.Sprintf("%d", endMs),
 	}).Result()
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get trade history: %w", err)
+	}
+
+	if s.config.Debug {
+		log.Printf("Found %d trades in Redis for %s", len(trades), symbol)
 	}
 
 	events := make([]models.AggTradeEvent, 0, len(trades))
@@ -196,25 +213,41 @@ func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, 
 		if len(trade) > 2 && trade[0] == 0x1f && trade[1] == 0x8b {
 			reader, err := gzip.NewReader(strings.NewReader(trade))
 			if err != nil {
-				log.Printf("Failed to create gzip reader for trade: %v", err)
+				if s.config.Debug {
+					log.Printf("Failed to create gzip reader for trade: %v", err)
+				}
 				continue
 			}
 			decompressed, err := io.ReadAll(reader)
 			reader.Close()
 			if err != nil {
-				log.Printf("Failed to decompress trade data: %v", err)
+				if s.config.Debug {
+					log.Printf("Failed to decompress trade data: %v", err)
+				}
 				continue
 			}
 			trade = string(decompressed)
 		}
 
+		if s.config.Debug {
+			// Debug: Print raw trade data
+			log.Printf("Raw trade data: %s", trade)
+		}
+
 		var event models.AggTradeEvent
+		event.SetDebug(s.config.Debug)
 		if err := json.Unmarshal([]byte(trade), &event); err != nil {
-			log.Printf("Failed to unmarshal trade data: %v", err)
+			if s.config.Debug {
+				log.Printf("Failed to unmarshal trade data: %v", err)
+			}
 			continue
 		}
+
 		events = append(events, event)
 	}
 
+	if s.config.Debug {
+		log.Printf("Successfully parsed %d trades for %s", len(events), symbol)
+	}
 	return events, nil
-} 
+}

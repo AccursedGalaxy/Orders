@@ -13,6 +13,7 @@ import (
 	"binance-redis-streamer/pkg/binance"
 	"binance-redis-streamer/pkg/config"
 	"binance-redis-streamer/pkg/messaging"
+	"binance-redis-streamer/pkg/storage"
 )
 
 // Service handles the ingestion of trade data from Binance
@@ -25,11 +26,11 @@ type Service struct {
 }
 
 // NewService creates a new ingestion service
-func NewService(cfg *config.Config, client *binance.Client, messageBus messaging.MessageBus) *Service {
+func NewService(cfg *config.Config, client *binance.Client, store *storage.RedisStore) *Service {
 	return &Service{
 		config:     cfg,
 		client:     client,
-		messageBus: messageBus,
+		messageBus: messaging.NewRedisPubSub(store.GetRedisClient()),
 		wsConns:    make(map[string]*websocket.Conn),
 	}
 }
@@ -95,7 +96,7 @@ func (s *Service) createSymbolGroups(symbols []string) [][]string {
 // processSymbolGroup handles WebSocket connection for a group of symbols
 func (s *Service) processSymbolGroup(ctx context.Context, symbols []string) error {
 	url := s.client.BuildStreamURL(symbols)
-	
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -170,7 +171,7 @@ func (s *Service) handlePing(ctx context.Context, conn *websocket.Conn) {
 	}
 }
 
-// processMessage processes a WebSocket message and publishes it to NATS
+// processMessage processes a WebSocket message and publishes it to Redis
 func (s *Service) processMessage(ctx context.Context, message []byte) error {
 	var event models.AggTradeEvent
 	if err := event.UnmarshalJSON(message); err != nil {
@@ -194,4 +195,4 @@ func (s *Service) Stop() {
 		conn.Close()
 	}
 	s.wsConns = make(map[string]*websocket.Conn)
-} 
+}
