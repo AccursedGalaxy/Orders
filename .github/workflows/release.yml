@@ -8,7 +8,6 @@ jobs:
   release:
     name: Test, Build & Release
     runs-on: ubuntu-22.04
-    # Skip if it's a release commit
     if: '!contains(github.event.head_commit.message, ''chore(release)'')'
     permissions:
       contents: write
@@ -71,6 +70,13 @@ jobs:
           file: ./coverage.txt
           fail_ci_if_error: true
 
+      - name: Configure Git
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+
       - name: Prepare version
         id: version
         run: |
@@ -78,20 +84,29 @@ jobs:
           git fetch --tags --force
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           LATEST_VERSION=${LATEST_TAG#v}
-          CURRENT_VERSION=$(jq -r .version project.json)
           
           # Calculate new version
           NEW_VERSION=$(echo $LATEST_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
-          # Update project.json with new version
-          jq ".version = \"$NEW_VERSION\"" project.json > project.json.tmp && mv project.json.tmp project.json
+          # Create and switch to a temporary branch
+          TEMP_BRANCH="temp/release-v$NEW_VERSION"
+          git checkout -b $TEMP_BRANCH
           
-          # Create release branch
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git checkout -b release/v$NEW_VERSION
+          # Update project.json with new version
+          if [ -f project.json ]; then
+            jq ".version = \"$NEW_VERSION\"" project.json > project.json.tmp && mv project.json.tmp project.json
+          else
+            echo "{\"version\": \"$NEW_VERSION\"}" > project.json
+          fi
+          
+          # Stage and commit the project.json changes
+          git add project.json
+          git commit -m "chore: update version to $NEW_VERSION"
+          
+          # Push the temporary branch
+          git push -u origin $TEMP_BRANCH
 
       - name: Generate changelog
         id: changelog
@@ -100,13 +115,16 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           version-file: './project.json'
           version-path: 'version'
-          git-message: 'chore(release): {version} [skip ci]'
+          git-message: 'chore(release): {version}'
           output-file: 'CHANGELOG.md'
-          skip-version-file: false
+          skip-version-file: true
           skip-commit: false
           skip-on-empty: false
-          git-branch: release/v${{ env.NEW_VERSION }}
+          git-branch: temp/release-v${{ env.NEW_VERSION }}
           fallback-version: ${{ env.NEW_VERSION }}
+          preset: 'angular'
+          tag-prefix: 'v'
+          release-count: 0
 
       - name: Build binaries
         run: |
@@ -129,7 +147,7 @@ jobs:
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore(release): v${{ env.NEW_VERSION }} [skip ci]"
+          commit-message: "chore(release): v${{ env.NEW_VERSION }}"
           title: "chore(release): v${{ env.NEW_VERSION }}"
           body: |
             Release version ${{ env.NEW_VERSION }}
@@ -140,6 +158,7 @@ jobs:
             
             ${{ steps.changelog.outputs.clean_changelog }}
           branch: release/v${{ env.NEW_VERSION }}
+          delete-branch: true
           base: main
           labels: release
 
