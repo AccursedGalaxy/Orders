@@ -2,7 +2,6 @@ package config
 
 import (
 	"fmt"
-	"log"
 	"os"
 	"time"
 )
@@ -47,12 +46,11 @@ type WebSocketConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Redis: RedisConfig{
-			URL:             getRedisURL(),
-			RetentionPeriod: 24 * time.Hour,
-			CleanupInterval: 1 * time.Hour,
+			URL:             getEnvOrDefault("REDIS_URL", "redis://localhost:6379"),
+			RetentionPeriod: 2 * time.Hour,
+			CleanupInterval: 5 * time.Minute,
 			KeyPrefix:       "binance:",
-
-			MaxTradesPerKey: 10000,
+			MaxTradesPerKey: 100000,
 		},
 		Binance: BinanceConfig{
 			BaseURL:           "https://api.binance.com",
@@ -69,26 +67,12 @@ func DefaultConfig() *Config {
 	}
 }
 
-// getRedisURL returns the Redis URL based on the environment
-func getRedisURL() string {
-	// First check for custom Redis URL (highest priority for local development)
-	url := os.Getenv("CUSTOM_REDIS_URL")
-	if url != "" {
-		log.Printf("Using custom Redis URL from CUSTOM_REDIS_URL environment variable")
-		return url
+// getEnvOrDefault returns environment variable value or default if not set
+func getEnvOrDefault(key, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
 	}
-
-	// Then check for Heroku Redis URL (used in Heroku environment)
-	url = os.Getenv("REDIS_URL")
-	if url != "" {
-		log.Printf("Using Heroku Redis URL from REDIS_URL environment variable")
-		return url
-	}
-
-	// Default to local Redis if no environment variables are set
-	defaultURL := "redis://localhost:6379/0"
-	log.Printf("No Redis URL found in environment variables (CUSTOM_REDIS_URL or REDIS_URL), using default local URL: %s", defaultURL)
-	return defaultURL
+	return defaultValue
 }
 
 // Validate checks if the configuration is valid

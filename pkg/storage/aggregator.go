@@ -115,7 +115,7 @@ func (a *TradeAggregator) flushCandles(ctx context.Context) error {
 
 // migrateHistoricalData moves old data from Redis to PostgreSQL
 func (a *TradeAggregator) migrateHistoricalData(ctx context.Context) {
-	ticker := time.NewTicker(15 * time.Minute)
+	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
 
 	for {
@@ -142,9 +142,9 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 	}
 
 	for _, symbol := range symbols {
-		// Get trades older than 24 hours for migration to PostgreSQL
-		end := time.Now().Add(-24 * time.Hour)
-		start := end.Add(-24 * time.Hour) // Get the previous 24 hours of data for migration
+		// Get trades older than 2 hours for migration to PostgreSQL
+		end := time.Now().Add(-2 * time.Hour)
+		start := end.Add(-22 * time.Hour) // Get the remaining 22 hours to complete 24h in PostgreSQL
 
 		trades, err := a.redisStore.GetTradeHistory(ctx, symbol, start, end)
 		if err != nil {
@@ -173,6 +173,12 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 				log.Printf("Error storing candle data for %s: %v", symbol, err)
 				continue
 			}
+		}
+
+		// After successful migration, clean up Redis data older than retention period
+		if err := a.redisStore.trimHistory(ctx, fmt.Sprintf("%strade:%s:history",
+			a.redisStore.config.Redis.KeyPrefix, strings.ToUpper(symbol))); err != nil {
+			log.Printf("Warning: failed to trim Redis history for %s: %v", symbol, err)
 		}
 	}
 

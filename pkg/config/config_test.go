@@ -9,16 +9,20 @@ func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
 	// Test Redis defaults
-	if cfg.Redis.RetentionPeriod != 24*time.Hour {
-		t.Errorf("Expected RetentionPeriod to be 24h, got %v", cfg.Redis.RetentionPeriod)
+	if cfg.Redis.RetentionPeriod != 2*time.Hour {
+		t.Errorf("Expected RetentionPeriod to be 2h, got %v", cfg.Redis.RetentionPeriod)
 	}
 
-	if cfg.Redis.CleanupInterval != time.Hour {
-		t.Errorf("Expected CleanupInterval to be 1h, got %v", cfg.Redis.CleanupInterval)
+	if cfg.Redis.CleanupInterval != 5*time.Minute {
+		t.Errorf("Expected CleanupInterval to be 5m, got %v", cfg.Redis.CleanupInterval)
 	}
 
 	if cfg.Redis.KeyPrefix != "binance:" {
 		t.Errorf("Expected KeyPrefix to be 'binance:', got %v", cfg.Redis.KeyPrefix)
+	}
+
+	if cfg.Redis.MaxTradesPerKey != 100000 {
+		t.Errorf("Expected MaxTradesPerKey to be 100000, got %d", cfg.Redis.MaxTradesPerKey)
 	}
 
 	// Test Binance defaults

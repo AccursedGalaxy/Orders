@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"binance-redis-streamer/internal/models"
 	"binance-redis-streamer/pkg/config"
@@ -59,6 +60,22 @@ func (s *Service) handleTrade(trade *models.AggTradeEvent) error {
 		defer func() { <-s.workerPool }()
 	case <-s.stopCh:
 		return fmt.Errorf("service is stopping")
+	}
+
+	// Check for duplicate trade
+	tradeKey := fmt.Sprintf("%s:%d", trade.Data.Symbol, trade.Data.TradeID)
+	duplicateKey := fmt.Sprintf("%strade:processed:%s", s.config.Redis.KeyPrefix, tradeKey)
+
+	// Try to set the key with 1-hour expiry
+	isNew, err := s.redisStore.GetRedisClient().SetNX(context.Background(), duplicateKey, "1", time.Hour).Result()
+	if err != nil {
+		log.Printf("Warning: failed to check for duplicate trade: %v", err)
+	} else if !isNew {
+		// This is a duplicate trade, skip processing
+		if s.config.Debug {
+			log.Printf("Skipping duplicate trade for %s (ID: %d)", trade.Data.Symbol, trade.Data.TradeID)
+		}
+		return nil
 	}
 
 	log.Printf("Received trade event for %s: price=%s, quantity=%s",
