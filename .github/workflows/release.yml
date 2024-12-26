@@ -130,18 +130,27 @@ jobs:
       - name: Commit changes
         if: steps.check_changes.outputs.has_changes == 'true'
         run: |
+          # Create a new branch for the release
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          # Stage all changes including go.mod and go.sum
+          git checkout -b release/v${{ env.VERSION }}
+          
+          # Stage and commit changes
           git add .
           git commit -m "chore(release): v${{ env.VERSION }}"
-          # Delete existing tag if it exists
-          git tag -d "v${{ env.VERSION }}" || true
-          git push origin ":refs/tags/v${{ env.VERSION }}" || true
-          # Create and push new tag
-          git tag -a "v${{ env.VERSION }}" -m "Release v${{ env.VERSION }}"
-          git push
-          git push --tags
+          
+          # Push the release branch
+          git push origin release/v${{ env.VERSION }}
+          
+          # Create Pull Request
+          gh pr create \
+            --title "chore(release): v${{ env.VERSION }}" \
+            --body "Automated release PR for version v${{ env.VERSION }}" \
+            --base main \
+            --head release/v${{ env.VERSION }} \
+            --label "release"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Create Release
         if: steps.check_changes.outputs.has_changes == 'true'
@@ -153,7 +162,7 @@ jobs:
           files: |
             bin/binance-redis-streamer-linux-amd64.tar.gz
             bin/binance-redis-streamer-darwin-amd64.tar.gz
-          draft: false
+          draft: true  # Create as draft until PR is merged
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
