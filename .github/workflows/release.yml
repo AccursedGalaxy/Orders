@@ -44,9 +44,17 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.21.5'
           check-latest: true
           cache: true
+
+      - name: Update dependencies
+        run: |
+          # Update to latest minor versions
+          go get -u ./...
+          # Ensure we have the latest x/net with security fixes
+          go get -u golang.org/x/net
+          go mod tidy
 
       - name: Run tests
         env:
@@ -124,7 +132,8 @@ jobs:
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
-          git add project.json CHANGELOG.md
+          # Stage all changes including go.mod and go.sum
+          git add .
           git commit -m "chore(release): v${{ env.VERSION }}"
           # Delete existing tag if it exists
           git tag -d "v${{ env.VERSION }}" || true
