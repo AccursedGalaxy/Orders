@@ -47,7 +47,7 @@ type WebSocketConfig struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Redis: RedisConfig{
-			URL:             "redis://localhost:6379/0",
+			URL:             getRedisURL(),
 			RetentionPeriod: 24 * time.Hour,
 			CleanupInterval: 1 * time.Hour,
 			KeyPrefix:       "binance:",
