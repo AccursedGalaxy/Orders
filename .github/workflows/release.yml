@@ -75,6 +75,7 @@ jobs:
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
 
       - name: Prepare version
         id: version
@@ -89,6 +90,9 @@ jobs:
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
+          # Create release branch from current HEAD
+          git checkout -b release/v$NEW_VERSION
+          
           # Update project.json with new version
           if [ -f project.json ]; then
             jq ".version = \"$NEW_VERSION\"" project.json > project.json.tmp && mv project.json.tmp project.json
@@ -96,12 +100,12 @@ jobs:
             echo "{\"version\": \"$NEW_VERSION\"}" > project.json
           fi
           
-          # Stage the project.json changes
+          # Stage and commit the project.json changes
           git add project.json
           git commit -m "chore: update version to $NEW_VERSION"
           
-          # Create and switch to release branch
-          git checkout -b release/v$NEW_VERSION
+          # Push the branch to remote
+          git push -u origin release/v$NEW_VERSION
 
       - name: Generate changelog
         id: changelog
@@ -120,7 +124,6 @@ jobs:
           preset: 'angular'
           tag-prefix: 'v'
           release-count: 0
-          config-file-path: '.versionrc'
 
       - name: Build binaries
         run: |
