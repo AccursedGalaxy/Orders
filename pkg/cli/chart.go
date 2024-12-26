@@ -62,9 +62,24 @@ Example: binance-cli chart BTCUSDT --period 24h`,
 			// Fetch candles for the time period
 			end := time.Now()
 			start := end.Add(-duration)
+
+			log.Printf("Fetching candles for %s from %s to %s", symbol, start.Format(time.RFC3339), end.Format(time.RFC3339))
+
 			dbCandles, err := postgresStore.GetHistoricalCandles(context.Background(), symbol, start, end)
 			if err != nil {
+				log.Printf("Error fetching candles: %v", err)
 				return fmt.Errorf("failed to fetch candles: %w", err)
+			}
+
+			log.Printf("Retrieved %d candles from PostgreSQL", len(dbCandles))
+			if len(dbCandles) > 0 {
+				log.Printf("First candle: Time=%s, Open=%s, High=%s, Low=%s, Close=%s, Volume=%s",
+					dbCandles[0].Timestamp.Format(time.RFC3339),
+					dbCandles[0].OpenPrice,
+					dbCandles[0].HighPrice,
+					dbCandles[0].LowPrice,
+					dbCandles[0].ClosePrice,
+					dbCandles[0].Volume)
 			}
 
 			// Convert to chart data format
@@ -79,11 +94,20 @@ Example: binance-cli chart BTCUSDT --period 24h`,
 			}
 
 			for i, candle := range dbCandles {
-				data.Time[i] = candle.Timestamp.Format(time.RFC3339)
-				data.Open[i] = candle.OpenPrice
-				data.High[i] = candle.HighPrice
-				data.Low[i] = candle.LowPrice
-				data.Close[i] = candle.ClosePrice
+				// Convert timestamp to Unix timestamp in seconds
+				data.Time[i] = fmt.Sprintf("%d", candle.Timestamp.Unix())
+
+				// Convert string prices to float64 for proper JSON encoding
+				open, _ := strconv.ParseFloat(candle.OpenPrice, 64)
+				high, _ := strconv.ParseFloat(candle.HighPrice, 64)
+				low, _ := strconv.ParseFloat(candle.LowPrice, 64)
+				close, _ := strconv.ParseFloat(candle.ClosePrice, 64)
+
+				data.Open[i] = fmt.Sprintf("%.8f", open)
+				data.High[i] = fmt.Sprintf("%.8f", high)
+				data.Low[i] = fmt.Sprintf("%.8f", low)
+				data.Close[i] = fmt.Sprintf("%.8f", close)
+
 				vol, _ := strconv.ParseFloat(candle.Volume, 64)
 				data.Volume[i] = vol
 			}
@@ -100,9 +124,11 @@ Example: binance-cli chart BTCUSDT --period 24h`,
 				}
 				data := struct {
 					Symbol string
+					Period string
 					Data   []*models.Candle
 				}{
 					Symbol: symbol,
+					Period: period,
 					Data:   dbCandles,
 				}
 
@@ -113,7 +139,17 @@ Example: binance-cli chart BTCUSDT --period 24h`,
 			})
 
 			// API endpoint for chart data
-			r.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+			r.HandleFunc("/api/data", func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/json")
+
+				// Log the data being sent for debugging
+				if len(data.Time) > 0 {
+					log.Printf("Sending %d candles. First candle: Time=%s, Open=%s, High=%s, Low=%s, Close=%s, Volume=%.2f",
+						len(data.Time), data.Time[0], data.Open[0], data.High[0], data.Low[0], data.Close[0], data.Volume[0])
+				} else {
+					log.Printf("Warning: No candle data available")
+				}
+
 				if err := json.NewEncoder(w).Encode(data); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return

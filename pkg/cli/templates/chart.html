@@ -63,11 +63,19 @@
             timeScale: {
                 borderColor: '#2a2e39',
                 timeVisible: true,
+                secondsVisible: false
             },
         };
 
         const chart = LightweightCharts.createChart(document.getElementById('chart-container'), chartProperties);
-        const candleSeries = chart.addCandlestickSeries();
+        const candleSeries = chart.addCandlestickSeries({
+            upColor: '#26a69a',
+            downColor: '#ef5350',
+            borderVisible: false,
+            wickUpColor: '#26a69a',
+            wickDownColor: '#ef5350'
+        });
+        
         const volumeSeries = chart.addHistogramSeries({
             color: '#26a69a',
             priceFormat: {
@@ -82,25 +90,38 @@
 
         // Fetch and update data
         async function updateChart() {
-            const response = await fetch('/api/data');
-            const data = await response.json();
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
 
-            const candleData = data.time.map((t, i) => ({
-                time: new Date(t).getTime() / 1000,
-                open: parseFloat(data.open[i]),
-                high: parseFloat(data.high[i]),
-                low: parseFloat(data.low[i]),
-                close: parseFloat(data.close[i]),
-            }));
+                if (!data.time || data.time.length === 0) {
+                    console.warn('No data received');
+                    return;
+                }
 
-            const volumeData = data.time.map((t, i) => ({
-                time: new Date(t).getTime() / 1000,
-                value: data.volume[i],
-                color: parseFloat(data.close[i]) >= parseFloat(data.open[i]) ? '#26a69a' : '#ef5350',
-            }));
+                const candleData = data.time.map((t, i) => ({
+                    time: parseInt(t),
+                    open: parseFloat(data.open[i]),
+                    high: parseFloat(data.high[i]),
+                    low: parseFloat(data.low[i]),
+                    close: parseFloat(data.close[i])
+                }));
 
-            candleSeries.setData(candleData);
-            volumeSeries.setData(volumeData);
+                const volumeData = data.time.map((t, i) => ({
+                    time: parseInt(t),
+                    value: data.volume[i],
+                    color: parseFloat(data.close[i]) >= parseFloat(data.open[i]) ? '#26a69a' : '#ef5350'
+                }));
+
+                console.log('First candle:', candleData[0]);
+                candleSeries.setData(candleData);
+                volumeSeries.setData(volumeData);
+
+                // Fit the content
+                chart.timeScale().fitContent();
+            } catch (error) {
+                console.error('Error updating chart:', error);
+            }
         }
 
         // Initial update

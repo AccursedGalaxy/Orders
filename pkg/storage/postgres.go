@@ -53,7 +53,7 @@ func NewPostgresStore() (*PostgresStore, error) {
 
 	store := &PostgresStore{
 		db:    db,
-		debug: os.Getenv("DEBUG") == "true",
+		debug: true,
 	}
 
 	// Create tables if they don't exist
@@ -109,9 +109,10 @@ func (s *PostgresStore) createTables() error {
 // StoreCandleData stores 1-minute aggregated trade data
 func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, candle *models.Candle) error {
 	if s.debug {
-		log.Printf("Storing candle data for %s at %s: open=%s, close=%s, volume=%s",
+		log.Printf("Storing candle data for %s at %s: open=%s, high=%s, low=%s, close=%s, volume=%s, trades=%d",
 			symbol, candle.Timestamp.Format(time.RFC3339),
-			candle.OpenPrice, candle.ClosePrice, candle.Volume)
+			candle.OpenPrice, candle.HighPrice, candle.LowPrice, candle.ClosePrice,
+			candle.Volume, candle.TradeCount)
 	}
 
 	// Ensure timestamp is in UTC
@@ -153,6 +154,22 @@ func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, cand
 	} else if s.debug {
 		log.Printf("Stored candle data for %s at %s: %d rows affected",
 			symbol, timestamp.Format(time.RFC3339), rowsAffected)
+	}
+
+	// Verify the data was stored
+	if s.debug {
+		var count int
+		err := s.db.QueryRowContext(ctx, `
+			SELECT COUNT(*) FROM trade_candles 
+			WHERE symbol = $1 AND timestamp = $2`,
+			symbol, timestamp,
+		).Scan(&count)
+		if err != nil {
+			log.Printf("Warning: failed to verify stored data: %v", err)
+		} else {
+			log.Printf("Verified candle data for %s at %s: found %d records",
+				symbol, timestamp.Format(time.RFC3339), count)
+		}
 	}
 
 	return nil

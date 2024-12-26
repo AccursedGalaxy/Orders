@@ -66,8 +66,8 @@ func (a *TradeAggregator) ProcessTrade(ctx context.Context, trade *models.Trade)
 	candleTime := trade.Time.Truncate(time.Minute)
 	key := fmt.Sprintf("%s:%s", trade.Symbol, candleTime.Format(time.RFC3339))
 
-	log.Printf("Processing trade for %s at %s: price=%s, quantity=%s",
-		trade.Symbol, candleTime.Format(time.RFC3339), trade.Price, trade.Quantity)
+	log.Printf("Processing trade for %s at %s: price=%s, quantity=%s, trade_time=%s",
+		trade.Symbol, candleTime.Format(time.RFC3339), trade.Price, trade.Quantity, trade.Time.Format(time.RFC3339))
 
 	// Get or create candle
 	candle, exists := a.candles[key]
@@ -77,6 +77,11 @@ func (a *TradeAggregator) ProcessTrade(ctx context.Context, trade *models.Trade)
 		log.Printf("Created new candle for %s at %s", trade.Symbol, candleTime.Format(time.RFC3339))
 	}
 	candle.UpdateFromTrade(trade)
+
+	log.Printf("Updated candle for %s at %s: open=%s, high=%s, low=%s, close=%s, volume=%s, trades=%d",
+		trade.Symbol, candleTime.Format(time.RFC3339),
+		candle.OpenPrice, candle.HighPrice, candle.LowPrice, candle.ClosePrice,
+		candle.Volume, candle.TradeCount)
 
 	return nil
 }
@@ -94,9 +99,10 @@ func (a *TradeAggregator) flushCandles(ctx context.Context) error {
 		// Only flush candles that are complete (from previous minutes)
 		if candle.Timestamp.Before(currentMinute) {
 			symbol := strings.Split(key, ":")[0]
-			log.Printf("Flushing candle for %s at %s: open=%s, close=%s, volume=%s",
+			log.Printf("Flushing candle for %s at %s: open=%s, high=%s, low=%s, close=%s, volume=%s, trades=%d",
 				symbol, candle.Timestamp.Format(time.RFC3339),
-				candle.OpenPrice, candle.ClosePrice, candle.Volume)
+				candle.OpenPrice, candle.HighPrice, candle.LowPrice, candle.ClosePrice,
+				candle.Volume, candle.TradeCount)
 
 			if err := a.postgresStore.StoreCandleData(ctx, symbol, candle); err != nil {
 				log.Printf("Failed to store candle data: %v", err)
@@ -104,6 +110,10 @@ func (a *TradeAggregator) flushCandles(ctx context.Context) error {
 			}
 			delete(a.candles, key)
 			flushedCount++
+			log.Printf("Successfully flushed candle for %s at %s", symbol, candle.Timestamp.Format(time.RFC3339))
+		} else {
+			log.Printf("Skipping current candle for %s at %s (not complete yet)",
+				strings.Split(key, ":")[0], candle.Timestamp.Format(time.RFC3339))
 		}
 	}
 
