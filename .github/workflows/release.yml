@@ -75,13 +75,15 @@ jobs:
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          # Use deploy key or PAT for authentication
           git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
+          # Fetch all history and tags
+          git fetch --prune --unshallow --tags
 
       - name: Prepare version
         id: version
         run: |
           # Get the latest version from git tags
-          git fetch --tags --force
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           LATEST_VERSION=${LATEST_TAG#v}
           
@@ -90,9 +92,10 @@ jobs:
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
-          # Create and switch to a temporary branch
+          # Create and switch to a temporary branch from the latest main
+          git fetch origin main
           TEMP_BRANCH="temp/release-v$NEW_VERSION"
-          git checkout -b $TEMP_BRANCH
+          git checkout -b $TEMP_BRANCH origin/main
           
           # Update project.json with new version
           if [ -f project.json ]; then
@@ -105,8 +108,8 @@ jobs:
           git add project.json
           git commit -m "chore: update version to $NEW_VERSION"
           
-          # Push the temporary branch
-          git push -u origin $TEMP_BRANCH
+          # Force push the temporary branch
+          git push -f origin $TEMP_BRANCH
 
       - name: Generate changelog
         id: changelog
