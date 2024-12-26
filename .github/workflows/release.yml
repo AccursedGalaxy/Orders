@@ -8,7 +8,7 @@ jobs:
   release:
     name: Test, Build & Release
     runs-on: ubuntu-22.04
-    if: '!contains(github.event.head_commit.message, ''chore(release)'')'
+    if: ${{ !contains(github.event.head_commit.message, 'chore(release)') }}
     permissions:
       contents: write
       pull-requests: write
@@ -50,9 +50,7 @@ jobs:
 
       - name: Update dependencies
         run: |
-          # Update to latest minor versions
           go get -u ./...
-          # Ensure we have the latest x/net with security fixes
           go get -u golang.org/x/net
           go mod tidy
 
@@ -70,46 +68,26 @@ jobs:
           file: ./coverage.txt
           fail_ci_if_error: true
 
-      - name: Configure Git
+      - name: Prepare release
+        id: prepare_release
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
-          git config --global --add safe.directory "$GITHUB_WORKSPACE"
-          # Use deploy key or PAT for authentication
-          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
-          # Fetch all history and tags
-          git fetch --prune --tags
-
-      - name: Prepare version
-        id: version
-        run: |
-          # Get the latest version from git tags
+          
+          # Get the latest version and bump it
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           LATEST_VERSION=${LATEST_TAG#v}
-          
-          # Calculate new version
           NEW_VERSION=$(echo $LATEST_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
-          # Create and switch to a temporary branch from the latest main
-          git fetch origin main
-          TEMP_BRANCH="temp/release-v$NEW_VERSION"
-          git checkout -b $TEMP_BRANCH origin/main
+          # Create a release branch
+          git checkout -b release/v$NEW_VERSION
           
-          # Update project.json with new version
+          # Update project.json
           if [ -f project.json ]; then
             jq ".version = \"$NEW_VERSION\"" project.json > project.json.tmp && mv project.json.tmp project.json
-          else
-            echo "{\"version\": \"$NEW_VERSION\"}" > project.json
+            git add project.json
           fi
-          
-          # Stage and commit the project.json changes
-          git add project.json
-          git commit -m "chore: update version to $NEW_VERSION"
-          
-          # Force push the temporary branch
-          git push -f origin $TEMP_BRANCH
 
       - name: Generate changelog
         id: changelog
@@ -121,9 +99,8 @@ jobs:
           git-message: 'chore(release): {version}'
           output-file: 'CHANGELOG.md'
           skip-version-file: true
-          skip-commit: false
-          skip-on-empty: false
-          git-branch: temp/release-v${{ env.NEW_VERSION }}
+          skip-git-pull: true
+          git-branch: release/v${{ env.NEW_VERSION }}
           fallback-version: ${{ env.NEW_VERSION }}
           preset: 'angular'
           tag-prefix: 'v'
@@ -132,26 +109,21 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p bin
-          # Build Linux binaries
           GOOS=linux GOARCH=amd64 go build -o bin/streamer-linux-amd64 ./cmd/streamer
           GOOS=linux GOARCH=amd64 go build -o bin/redis-viewer-linux-amd64 ./cmd/redis-viewer
-          # Build Darwin (macOS) binaries
           GOOS=darwin GOARCH=amd64 go build -o bin/streamer-darwin-amd64 ./cmd/streamer
           GOOS=darwin GOARCH=amd64 go build -o bin/redis-viewer-darwin-amd64 ./cmd/redis-viewer
-
-      - name: Create archives
-        run: |
+          
           cd bin
           tar czf binance-redis-streamer-linux-amd64.tar.gz streamer-linux-amd64 redis-viewer-linux-amd64
           tar czf binance-redis-streamer-darwin-amd64.tar.gz streamer-darwin-amd64 redis-viewer-darwin-amd64
 
       - name: Create Pull Request
-        if: steps.changelog.outputs.skipped == 'false'
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           commit-message: "chore(release): v${{ env.NEW_VERSION }}"
-          title: "chore(release): v${{ env.NEW_VERSION }}"
+          title: "Release v${{ env.NEW_VERSION }}"
           body: |
             Release version ${{ env.NEW_VERSION }}
             
@@ -161,7 +133,6 @@ jobs:
             
             ${{ steps.changelog.outputs.clean_changelog }}
           branch: release/v${{ env.NEW_VERSION }}
-          delete-branch: true
           base: main
           labels: release
 
