@@ -164,7 +164,7 @@ jobs:
           files: |
             bin/binance-redis-streamer-linux-amd64.tar.gz
             bin/binance-redis-streamer-darwin-amd64.tar.gz
-          draft: true
+          draft: false
           prerelease: false
           generate_release_notes: true
         env:
