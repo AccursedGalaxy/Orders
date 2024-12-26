@@ -82,11 +82,17 @@ func (s *Service) Start(ctx context.Context) error {
 
 // createSymbolGroups splits symbols into groups based on MaxStreamsPerConn
 func (s *Service) createSymbolGroups(symbols []string) [][]string {
-	var groups [][]string
-	for i := 0; i < len(symbols); i += s.config.Binance.MaxStreamsPerConn {
-		end := i + s.config.Binance.MaxStreamsPerConn
-		if end > len(symbols) {
-			end = len(symbols)
+	// Split symbols into groups of maxSymbolsPerConnection
+	symbolCount := len(symbols)
+	groupSize := s.config.Binance.MaxStreamsPerConn
+	groupCount := (symbolCount + groupSize - 1) / groupSize // Ceiling division
+
+	groups := make([][]string, 0, groupCount)
+
+	for i := 0; i < symbolCount; i += groupSize {
+		end := i + groupSize
+		if end > symbolCount {
+			end = symbolCount
 		}
 		groups = append(groups, symbols[i:end])
 	}

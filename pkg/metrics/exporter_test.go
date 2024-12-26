@@ -12,10 +12,10 @@ import (
 
 func setupTestExporter(t *testing.T) (*MetricsExporter, *redis.Client) {
 	cfg := config.DefaultConfig()
-	
+
 	// Use test Redis URL
 	cfg.Redis.URL = "redis://localhost:6379/0"
-	
+
 	opt, err := redis.ParseURL(cfg.Redis.URL)
 	if err != nil {
 		t.Fatalf("Failed to parse Redis URL: %v", err)
@@ -102,4 +102,4 @@ func TestMetricsExporter_Start(t *testing.T) {
 	if metrics.Prices["BTCUSDT"] != "50000.00" {
 		t.Errorf("Expected BTCUSDT price 50000.00, got %s", metrics.Prices["BTCUSDT"])
 	}
-} 
+}

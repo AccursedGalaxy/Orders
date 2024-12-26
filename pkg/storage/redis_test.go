@@ -169,4 +169,4 @@ func BenchmarkGetTradeHistory(b *testing.B) {
 			}
 		}
 	})
-} 
+}

@@ -25,9 +25,9 @@ func setupTestPostgres(t *testing.T) (*PostgresStore, func()) {
 	// Temporarily set the environment variable for the store
 	oldURL := os.Getenv("DATABASE_URL")
 	os.Setenv("DATABASE_URL", dbURL)
-	
+
 	store, err := NewPostgresStore()
-	
+
 	// Restore the original environment variable
 	if oldURL != "" {
 		os.Setenv("DATABASE_URL", oldURL)
@@ -60,15 +60,15 @@ func TestPostgresStore_StoreCandleData(t *testing.T) {
 
 	ctx := context.Background()
 	timestamp := time.Now().Truncate(time.Minute)
-	
+
 	candle := &models.Candle{
-		Timestamp:   timestamp,
-		OpenPrice:   "50000.00",
-		HighPrice:   "51000.00",
-		LowPrice:    "49000.00",
-		ClosePrice:  "50500.00",
-		Volume:      "10.5",
-		TradeCount:  100,
+		Timestamp:  timestamp,
+		OpenPrice:  "50000.00",
+		HighPrice:  "51000.00",
+		LowPrice:   "49000.00",
+		ClosePrice: "50500.00",
+		Volume:     "10.5",
+		TradeCount: 100,
 	}
 
 	// Test storing new candle
@@ -79,13 +79,13 @@ func TestPostgresStore_StoreCandleData(t *testing.T) {
 
 	// Test updating existing candle
 	updatedCandle := &models.Candle{
-		Timestamp:   timestamp,
-		OpenPrice:   "50000.00",
-		HighPrice:   "52000.00",
-		LowPrice:    "48000.00",
-		ClosePrice:  "51500.00",
-		Volume:      "15.5",
-		TradeCount:  150,
+		Timestamp:  timestamp,
+		OpenPrice:  "50000.00",
+		HighPrice:  "52000.00",
+		LowPrice:   "48000.00",
+		ClosePrice: "51500.00",
+		Volume:     "15.5",
+		TradeCount: 150,
 	}
 
 	err = store.StoreCandleData(ctx, "BTCUSDT", updatedCandle)
@@ -124,4 +124,4 @@ func TestPostgresStore_StoreCandleData(t *testing.T) {
 	if result.tradeCount != 250 {
 		t.Errorf("Expected trade count 250, got %d", result.tradeCount)
 	}
-} 
+}

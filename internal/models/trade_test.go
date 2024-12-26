@@ -20,9 +20,9 @@ func TestNewCandle(t *testing.T) {
 	candle.UpdateFromTrade(trade)
 
 	tests := []struct {
-		name     string
-		field    string
-		
+		name  string
+		field string
+
 		got      string
 		expected string
 	}{
@@ -104,4 +104,4 @@ func TestCandleUpdate(t *testing.T) {
 	if candle.TradeCount != 3 {
 		t.Errorf("TradeCount = %v, want 3", candle.TradeCount)
 	}
-} 
+}

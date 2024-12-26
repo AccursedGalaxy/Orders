@@ -52,14 +52,14 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestConfigValidation(t *testing.T) {
 	tests := []struct {
-		name        string
+		name         string
 		modifyConfig func(*Config)
-		expectError bool
+		expectError  bool
 	}{
 		{
-			name: "valid default config",
+			name:         "valid default config",
 			modifyConfig: func(c *Config) {},
-			expectError: false,
+			expectError:  false,
 		},
 		{
 			name: "invalid retention period",
@@ -89,7 +89,7 @@ func TestConfigValidation(t *testing.T) {
 			cfg := DefaultConfig()
 			tt.modifyConfig(cfg)
 			err := cfg.Validate()
-			
+
 			if tt.expectError && err == nil {
 				t.Error("Expected error but got none")
 			}
@@ -98,4 +98,4 @@ func TestConfigValidation(t *testing.T) {
 			}
 		})
 	}
-} 
+}

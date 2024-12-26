@@ -13,7 +13,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"binance-redis-streamer/internal/models"
 	"binance-redis-streamer/pkg/config"
 	"binance-redis-streamer/pkg/storage"
 )
@@ -21,13 +20,9 @@ import (
 type symbolMetrics struct {
 	lastPrice     float64
 	prevPrice     float64
-	volume24h     float64
-	trades24h     int64
 	high24h       float64
 	low24h        float64
 	vwap          float64
-	buyVolume     float64
-	sellVolume    float64
 	lastTradeTime time.Time
 	tradesPerMin  float64
 	initialized   bool
@@ -39,13 +34,11 @@ type symbolMetrics struct {
 	vwapDev       float64 // Deviation from VWAP as percentage
 
 	// Volume metrics
-	relativeVol float64 // Current volume relative to 24h average
 	volMomentum float64 // Volume trend (positive = increasing)
 
 	// Trade metrics
-	avgTradeSize   float64 // Average trade size
-	largeTradesPct float64 // Percentage of volume from large trades
-	tradeAccel     float64 // Trade frequency acceleration
+	avgTradeSize float64 // Average trade size
+	tradeAccel   float64 // Trade frequency acceleration
 
 	// Market microstructure
 	orderImbalance float64 // Buy volume - Sell volume / Total volume
@@ -394,15 +387,6 @@ func interpretTrade(isBuyerMaker bool, price, quantity float64) string {
 }
 
 // displayTrade formats and displays a trade
-func displayTrade(trade *models.Trade) {
-	fmt.Printf("%-10s %-12s %-12s %-15s\n",
-		trade.Symbol,
-		trade.Price,
-		trade.Quantity,
-		trade.Time.Format("15:04:05"),
-	)
-}
-
 func calculateStdDev(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
@@ -504,16 +488,4 @@ func calculateTradeAcceleration(trades []float64) float64 {
 	}
 
 	return (recentAvg - earlierAvg) / earlierAvg * 100
-}
-
-func average(values []float64) float64 {
-	if len(values) == 0 {
-		return 0
-	}
-
-	var sum float64
-	for _, v := range values {
-		sum += v
-	}
-	return sum / float64(len(values))
 }

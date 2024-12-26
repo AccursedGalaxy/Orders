@@ -136,7 +136,7 @@ func (c *Client) GetSymbols(ctx context.Context) ([]string, error) {
 
 // fetchExchangeInfo fetches exchange information from Binance
 func (c *Client) fetchExchangeInfo(ctx context.Context, url string) (*models.ExchangeInfo, error) {
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -168,7 +168,7 @@ func (c *Client) fetchExchangeInfo(ctx context.Context, url string) (*models.Exc
 func (c *Client) fetch24hVolume(ctx context.Context) (map[string]float64, error) {
 	url := fmt.Sprintf("%s/api/v3/ticker/24hr", c.config.Binance.BaseURL)
 
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
@@ -282,7 +282,7 @@ func (c *Client) handleSymbolGroup(ctx context.Context, symbols []string) error 
 }
 
 func (c *Client) buildStreamURL(symbols []string) string {
-	var streams []string
+	streams := make([]string, 0, len(symbols))
 	for _, symbol := range symbols {
 		streams = append(streams, fmt.Sprintf("%s@trade", symbol))
 	}
@@ -374,9 +374,9 @@ func (c *Client) processMessage(ctx context.Context, message []byte) error {
 
 // BuildStreamURL builds the WebSocket stream URL for the given symbols
 func (c *Client) BuildStreamURL(symbols []string) string {
-	var streams []string
+	streams := make([]string, 0, len(symbols))
 	for _, symbol := range symbols {
-		streams = append(streams, fmt.Sprintf("%s@trade", symbol))
+		streams = append(streams, fmt.Sprintf("%s@trade", strings.ToLower(symbol)))
 	}
 	return fmt.Sprintf("wss://stream.binance.com:9443/stream?streams=%s", strings.Join(streams, "/"))
 }

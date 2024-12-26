@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -16,6 +17,7 @@ import (
 	"github.com/gorilla/mux"
 	"github.com/spf13/cobra"
 
+	"binance-redis-streamer/internal/models"
 	"binance-redis-streamer/pkg/storage"
 )
 
@@ -57,11 +59,40 @@ Example: binance-cli chart BTCUSDT --period 24h`,
 			}
 			defer postgresStore.Close()
 
+			// Fetch candles for the time period
+			end := time.Now()
+			start := end.Add(-duration)
+			dbCandles, err := postgresStore.GetHistoricalCandles(context.Background(), symbol, start, end)
+			if err != nil {
+				return fmt.Errorf("failed to fetch candles: %w", err)
+			}
+
+			// Convert to chart data format
+			data := ChartData{
+				Symbol: symbol,
+				Time:   make([]string, len(dbCandles)),
+				Open:   make([]string, len(dbCandles)),
+				High:   make([]string, len(dbCandles)),
+				Low:    make([]string, len(dbCandles)),
+				Close:  make([]string, len(dbCandles)),
+				Volume: make([]float64, len(dbCandles)),
+			}
+
+			for i, candle := range dbCandles {
+				data.Time[i] = candle.Timestamp.Format(time.RFC3339)
+				data.Open[i] = candle.OpenPrice
+				data.High[i] = candle.HighPrice
+				data.Low[i] = candle.LowPrice
+				data.Close[i] = candle.ClosePrice
+				vol, _ := strconv.ParseFloat(candle.Volume, 64)
+				data.Volume[i] = vol
+			}
+
 			// Setup router
 			r := mux.NewRouter()
 
 			// Serve static files
-			r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+			r.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 				tmpl, err := template.ParseFS(templateFS, "templates/chart.html")
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -69,53 +100,31 @@ Example: binance-cli chart BTCUSDT --period 24h`,
 				}
 				data := struct {
 					Symbol string
-					Period string
+					Data   []*models.Candle
 				}{
 					Symbol: symbol,
-					Period: period,
+					Data:   dbCandles,
 				}
-				tmpl.Execute(w, data)
-			})
 
-			// API endpoint for chart data
-			r.HandleFunc("/api/data", func(w http.ResponseWriter, r *http.Request) {
-				end := time.Now()
-				start := end.Add(-duration)
-
-				candles, err := postgresStore.GetHistoricalCandles(r.Context(), symbol, start, end)
-				if err != nil {
+				if err := tmpl.Execute(w, data); err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 					return
 				}
+			})
 
-				data := ChartData{
-					Symbol: symbol,
-					Time:   make([]string, len(candles)),
-					Open:   make([]string, len(candles)),
-					High:   make([]string, len(candles)),
-					Low:    make([]string, len(candles)),
-					Close:  make([]string, len(candles)),
-					Volume: make([]float64, len(candles)),
+			// API endpoint for chart data
+			r.HandleFunc("/data", func(w http.ResponseWriter, _ *http.Request) {
+				if err := json.NewEncoder(w).Encode(data); err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+					return
 				}
-
-				for i, candle := range candles {
-					data.Time[i] = candle.Timestamp.Format(time.RFC3339)
-					data.Open[i] = candle.OpenPrice
-					data.High[i] = candle.HighPrice
-					data.Low[i] = candle.LowPrice
-					data.Close[i] = candle.ClosePrice
-					vol, _ := strconv.ParseFloat(candle.Volume, 64)
-					data.Volume[i] = vol
-				}
-
-				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(data)
 			})
 
 			// Start server
 			srv := &http.Server{
-				Addr:    fmt.Sprintf(":%d", port),
-				Handler: r,
+				Addr:              fmt.Sprintf(":%d", port),
+				Handler:           r,
+				ReadHeaderTimeout: 10 * time.Second,
 			}
 
 			// Handle graceful shutdown
@@ -127,7 +136,9 @@ Example: binance-cli chart BTCUSDT --period 24h`,
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 				defer cancel()
 
-				srv.Shutdown(ctx)
+				if err := srv.Shutdown(ctx); err != nil {
+					log.Printf("Error shutting down server: %v", err)
+				}
 			}()
 
 			fmt.Printf("Opening chart for %s in your browser at http://localhost:%d\n", strings.ToUpper(symbol), port)

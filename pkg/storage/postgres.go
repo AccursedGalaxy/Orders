@@ -208,7 +208,9 @@ func (s *PostgresStore) GetHistoricalCandles(ctx context.Context, symbol string,
 	}
 	defer rows.Close()
 
-	var candles []*models.Candle
+	// Pre-allocate the slice with the expected capacity
+	candles := make([]*models.Candle, 0, count)
+
 	for rows.Next() {
 		candle := &models.Candle{}
 		err := rows.Scan(
@@ -257,7 +259,9 @@ func (s *PostgresStore) GetAggregatedCandles(ctx context.Context, symbol string,
 	}
 	defer rows.Close()
 
-	var candles []*models.Candle
+	// Pre-allocate the slice with a reasonable initial capacity
+	candles := make([]*models.Candle, 0, 1000)
+
 	for rows.Next() {
 		candle := &models.Candle{}
 		err := rows.Scan(

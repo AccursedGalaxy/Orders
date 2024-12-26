@@ -13,7 +13,7 @@ import (
 
 // SQLiteStore handles historical trade data storage
 type SQLiteStore struct {
-	db *sql.DB
+	db      *sql.DB
 	dataDir string
 }
 
@@ -37,7 +37,7 @@ func NewSQLiteStore(dataDir string) (*SQLiteStore, error) {
 	}
 
 	return &SQLiteStore{
-		db: db,
+		db:      db,
 		dataDir: dataDir,
 	}, nil
 }
@@ -91,7 +91,9 @@ func (s *SQLiteStore) GetHistoricalCandles(ctx context.Context, symbol string, s
 	}
 	defer rows.Close()
 
-	var candles []*models.Candle
+	// Pre-allocate the slice with a reasonable initial capacity
+	candles := make([]*models.Candle, 0, 1000)
+
 	for rows.Next() {
 		var timestamp int64
 		candle := &models.Candle{}
@@ -119,4 +121,4 @@ func (s *SQLiteStore) Close() error {
 func (s *SQLiteStore) Vacuum() error {
 	_, err := s.db.Exec("VACUUM")
 	return err
-} 
+}

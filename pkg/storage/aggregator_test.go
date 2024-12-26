@@ -40,7 +40,7 @@ func TestTradeAggregator_ProcessTrade(t *testing.T) {
 
 	ctx := context.Background()
 	now := time.Now()
-	
+
 	trade := &models.Trade{
 		Symbol:    "BTCUSDT",
 		Price:     "50000.00",
@@ -86,7 +86,7 @@ func TestTradeAggregator_FlushCandles(t *testing.T) {
 
 	ctx := context.Background()
 	pastTime := time.Now().Add(-2 * time.Minute)
-	
+
 	// Create a candle in the past
 	trade := &models.Trade{
 		Symbol:    "BTCUSDT",
@@ -116,4 +116,4 @@ func TestTradeAggregator_FlushCandles(t *testing.T) {
 	if numCandles != 0 {
 		t.Errorf("Expected 0 candles after flush, got %d", numCandles)
 	}
-} 
+}

@@ -99,18 +99,18 @@ func (s *RedisStore) StoreTrade(ctx context.Context, trade *models.Trade) error 
 
 	// Store in history
 	historyKey := fmt.Sprintf("%strade:%s:history", s.config.Redis.KeyPrefix, strings.ToUpper(trade.Symbol))
-	
+
 	// Create AggTradeEvent from Trade
 	event := models.AggTradeEvent{
 		Stream: fmt.Sprintf("%s@trade", strings.ToLower(trade.Symbol)),
 		Data: models.TradeData{
-			EventType:     "trade",
-			EventTime:     trade.EventTime.UnixMilli(),
-			Symbol:        trade.Symbol,
-			TradeID:      trade.TradeID,
-			Price:        trade.Price,
-			Quantity:     trade.Quantity,
-			TradeTime:    trade.Time.UnixMilli(),
+			EventType: "trade",
+			EventTime: trade.EventTime.UnixMilli(),
+			Symbol:    trade.Symbol,
+			TradeID:   trade.TradeID,
+			Price:     trade.Price,
+			Quantity:  trade.Quantity,
+			TradeTime: trade.Time.UnixMilli(),
 		},
 	}
 

@@ -21,6 +21,20 @@ func setupTestServer() (*httptest.Server, *config.Config) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
+
+		if strings.Contains(r.URL.Path, "/api/v3/ticker/24hr") {
+			// Mock 24hr ticker response
+			_, err := w.Write([]byte(`[
+				{"symbol":"BTCUSDT","quoteVolume":"1000000.00"},
+				{"symbol":"ETHUSDT","quoteVolume":"500000.00"}
+			]`))
+			if err != nil {
+				panic(err)
+			}
+			return
+		}
+
+		// Mock exchange info response
 		_, err := w.Write([]byte(`{
 			"symbols": [
 				{"symbol": "BTCUSDT", "status": "TRADING"},
@@ -28,7 +42,7 @@ func setupTestServer() (*httptest.Server, *config.Config) {
 			]
 		}`))
 		if err != nil {
-			panic(err) // In tests, we can panic on write error
+			panic(err)
 		}
 	}))
 
@@ -39,14 +53,14 @@ func setupTestServer() (*httptest.Server, *config.Config) {
 
 type mockStore struct {
 	storage.TradeStore
-	mu sync.RWMutex
-	trades map[string]*models.Trade
+	mu        sync.RWMutex
+	trades    map[string]*models.Trade
 	rawTrades map[string][]byte
 }
 
 func newMockStore() *mockStore {
 	return &mockStore{
-		trades: make(map[string]*models.Trade),
+		trades:    make(map[string]*models.Trade),
 		rawTrades: make(map[string][]byte),
 	}
 }
@@ -147,4 +161,51 @@ func BenchmarkProcessMessage(b *testing.B) {
 			}
 		}
 	})
-} 
+}
+
+func TestGetSymbols(t *testing.T) {
+	server, cfg := setupTestServer()
+	defer server.Close()
+
+	store := newMockStore()
+	client := NewClient(cfg, store)
+
+	symbols, err := client.GetSymbols(context.Background())
+	if err != nil {
+		t.Fatalf("Failed to get symbols: %v", err)
+	}
+
+	expectedSymbols := []string{"btcusdt", "ethusdt"}
+	if len(symbols) != len(expectedSymbols) {
+		t.Errorf("Expected %d symbols, got %d", len(expectedSymbols), len(symbols))
+	}
+
+	for i, symbol := range symbols {
+		if symbol != expectedSymbols[i] {
+			t.Errorf("Expected symbol %s, got %s", expectedSymbols[i], symbol)
+		}
+	}
+}
+
+func TestProcessMessage(t *testing.T) {
+	_, cfg := setupTestServer()
+	store := newMockStore()
+	client := NewClient(cfg, store)
+
+	msg := []byte(`{"stream":"btcusdt@aggTrade","data":{"e":"aggTrade","E":1625232862,"s":"BTCUSDT","p":"50000.00","q":"1.5","T":1625232862,"m":true}}`)
+
+	err := client.processMessage(context.Background(), msg)
+	if err != nil {
+		t.Fatalf("Failed to process message: %v", err)
+	}
+
+	// Verify the trade was stored
+	trade, err := store.GetLatestTrade(context.Background(), "BTCUSDT")
+	if err != nil {
+		t.Fatalf("Failed to get stored trade: %v", err)
+	}
+
+	if trade.Price != "50000.00" || trade.Quantity != "1.5" {
+		t.Errorf("Trade data mismatch: got price=%s, quantity=%s", trade.Price, trade.Quantity)
+	}
+}

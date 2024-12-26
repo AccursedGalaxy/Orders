@@ -103,4 +103,4 @@ func (e *MetricsExporter) exportMetrics(metrics *Metrics) {
 	for symbol, price := range metrics.Prices {
 		log.Printf("Price for %s: %s", symbol, price)
 	}
-} 
+}

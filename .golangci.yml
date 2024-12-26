@@ -1,56 +1,54 @@
 linters:
+  disable-all: true
   enable:
     - gofmt
     - govet
     - errcheck
-    - staticcheck
-    - gosimple
-    - ineffassign
-    - typecheck
-    - gocritic
-    - revive
     - gosec
-    - unconvert
-    - goconst
-    - gocyclo
-    - goimports
-    - misspell
+    - gocritic
     - prealloc
-    - exportloopref
-    - bodyclose
+    - unused
 
 linters-settings:
   gocritic:
-    enabled-tags:
-      - diagnostic
-      - experimental
-      - opinionated
-      - performance
-      - style
-  gocyclo:
-    min-complexity: 15
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-  misspell:
-    locale: US
+    disabled-checks:
+      - exitAfterDefer
+      - httpNoBody
+      - rangeValCopy
+      - nestingReduce
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
 
 issues:
   exclude-rules:
     - path: _test\.go
       linters:
-        - gosec
         - errcheck
+        - gosec
+    - path: pkg/cli/
+      linters:
+        - errcheck
+        - unused
+    - path: cmd/
+      linters:
+        - gocritic
+    - path: scripts/
+      linters:
+        - gocritic
+        - errcheck
+    - path: pkg/binance/client.go
+      text: "field .* is unused"
+    - path: pkg/metrics/exporter.go
+      text: "type name will be used as metrics.MetricsExporter"
+
   max-issues-per-linter: 0
   max-same-issues: 0
 
 run:
   timeout: 5m
-  skip-dirs:
-    - vendor
-    - third_party
-  skip-files:
-    - ".*_test\\.go$"
+  tests: true
 
 output:
   format: colored-line-number

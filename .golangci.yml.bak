@@ -1,0 +1,92 @@
+run:
+  timeout: 5m
+  tests: true
+
+issues:
+  exclude-files:
+    - ".*\\.pb\\.go$"
+    - ".*\\.gen\\.go$"
+  exclude-rules:
+    # Exclude some linters from running on tests files.
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - gosec
+        - bodyclose
+    # Exclude some rules for CLI commands
+    - path: pkg/cli/
+      linters:
+        - gocyclo
+        - errcheck
+        - unused
+    # Exclude some rules for main files
+    - path: cmd/
+      linters:
+        - gocyclo
+        - gocritic
+    # Exclude some rules for scripts
+    - path: scripts/
+      linters:
+        - gocyclo
+        - gocritic
+        - errcheck
+    # Specific file exclusions
+    - path: pkg/binance/client.go
+      text: "field `wsConn` is unused"
+    - path: pkg/binance/client.go
+      text: "field `mu` is unused"
+    - path: pkg/metrics/exporter.go
+      text: "type name will be used as metrics.MetricsExporter"
+  
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  enable:
+    - gofmt
+    - govet
+    - revive
+    - gocyclo
+    - errcheck
+    - gosec
+    - gocritic
+    - prealloc
+    - bodyclose
+    - unused
+  disable:
+    - exportloopref  # Deprecated since Go 1.22
+
+linters-settings:
+  gocyclo:
+    min-complexity: 25  # Increased from 15 to 25
+  revive:
+    rules:
+      - name: exported
+        disabled: true
+      - name: unused-parameter
+        disabled: true
+      - name: package-comments
+        disabled: true
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - style
+      - performance
+    disabled-checks:
+      - exitAfterDefer
+      - httpNoBody
+      - rangeValCopy
+      - nestingReduce
+  prealloc:
+    simple: true
+    range-loops: true
+    for-loops: true
+  gosec:
+    excludes:
+      - G112  # Potential Slowloris Attack
+
+output:
+  formats:
+    - format: colored-line-number
+  sort-results: true 
