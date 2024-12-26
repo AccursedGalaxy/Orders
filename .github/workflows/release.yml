@@ -99,7 +99,7 @@ jobs:
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
           # Make sure we're on a clean state
-          git fetch --prune --unshallow
+          git fetch --prune
           git checkout -B release/v$NEW_VERSION
           
           # Update project.json

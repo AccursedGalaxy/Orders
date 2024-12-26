@@ -35,6 +35,9 @@ gitpush: ## Push changes to git - pass last commit message as 'm' argument
 	git commit -m "$(m)"
 	git push
 
+gitreset: ## Reset changes in git
+	git reset --hard
+
 tools: ## Install development tools
 	@echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."
 	@curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $$(go env GOPATH)/bin $(GOLANGCI_LINT_VERSION)
