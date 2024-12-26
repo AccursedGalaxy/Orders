@@ -62,7 +62,7 @@ func (a *TradeAggregator) ProcessTrade(ctx context.Context, trade *models.Trade)
 	a.candleMu.Lock()
 	defer a.candleMu.Unlock()
 
-	// Create candle key (symbol + minute timestamp)
+	// Truncate to minute for candle
 	candleTime := trade.Time.Truncate(time.Minute)
 	key := fmt.Sprintf("%s:%s", trade.Symbol, candleTime.Format(time.RFC3339))
 
@@ -155,7 +155,8 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 		// Group trades by minute
 		candleMap := make(map[time.Time]*models.Candle)
 		for _, trade := range trades {
-			tradeTime := time.Unix(0, trade.Data.TradeTime).Truncate(time.Minute)
+			// Convert milliseconds to time
+			tradeTime := time.UnixMilli(trade.Data.TradeTime).Truncate(time.Minute)
 
 			if candle, exists := candleMap[tradeTime]; exists {
 				candle.UpdateFromTrade(trade.Data.ToTrade())

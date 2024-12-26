@@ -49,6 +49,9 @@ Example: binance-cli stats --period 1h BTCUSDT ETHUSDT`,
 			}
 			defer postgresStore.Close()
 
+			// Set debug mode
+			postgresStore.SetDebug(debug)
+
 			ctx := context.Background()
 
 			// If no symbols provided, get all available symbols
@@ -68,6 +71,11 @@ Example: binance-cli stats --period 1h BTCUSDT ETHUSDT`,
 			end := time.Now()
 			start := end.Add(-duration)
 
+			if debug {
+				log.Printf("Time range: %s to %s", start.Format(time.RFC3339), end.Format(time.RFC3339))
+				log.Printf("Symbols to query: %v", symbols)
+			}
+
 			fmt.Printf("Statistics for the last %s\n", period)
 			fmt.Println(strings.Repeat("-", 100))
 			fmt.Printf("%-10s %-12s %-12s %-12s %-12s %-15s %-10s\n",
@@ -76,10 +84,6 @@ Example: binance-cli stats --period 1h BTCUSDT ETHUSDT`,
 
 			noDataFound := true
 			for _, symbol := range symbols {
-				if debug {
-					log.Printf("Fetching historical candles for %s from %s to %s", symbol, start.Format(time.RFC3339), end.Format(time.RFC3339))
-				}
-
 				candles, err := postgresStore.GetHistoricalCandles(ctx, symbol, start, end)
 				if err != nil {
 					if debug {
@@ -106,11 +110,6 @@ Example: binance-cli stats --period 1h BTCUSDT ETHUSDT`,
 				trades := int64(0)
 
 				for _, candle := range candles {
-					if debug {
-						log.Printf("Processing candle: symbol=%s, time=%s, open=%s, close=%s, volume=%s, trades=%d",
-							symbol, candle.Timestamp.Format(time.RFC3339), candle.OpenPrice, candle.ClosePrice, candle.Volume, candle.TradeCount)
-					}
-
 					if candle.HighPrice > high {
 						high = candle.HighPrice
 					}
@@ -120,6 +119,11 @@ Example: binance-cli stats --period 1h BTCUSDT ETHUSDT`,
 					v, _ := strconv.ParseFloat(candle.Volume, 64)
 					volume += v
 					trades += candle.TradeCount
+				}
+
+				if debug {
+					log.Printf("Aggregated stats for %s: high=%s, low=%s, volume=%.2f, trades=%d",
+						symbol, high, low, volume, trades)
 				}
 
 				fmt.Printf("%-10s %-12s %-12s %-12s %-12s %-15.2f %-10d\n",

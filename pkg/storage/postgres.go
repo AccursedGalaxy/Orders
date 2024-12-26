@@ -18,6 +18,11 @@ type PostgresStore struct {
 	debug bool
 }
 
+// SetDebug sets the debug flag
+func (s *PostgresStore) SetDebug(debug bool) {
+	s.debug = debug
+}
+
 // NewPostgresStore creates a new PostgreSQL store
 func NewPostgresStore() (*PostgresStore, error) {
 	// Get DATABASE_URL from environment (Heroku sets this automatically)
@@ -103,9 +108,21 @@ func (s *PostgresStore) createTables() error {
 
 // StoreCandleData stores 1-minute aggregated trade data
 func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, candle *models.Candle) error {
-	log.Printf("Storing candle data for %s at %s: open=%s, close=%s, volume=%s",
-		symbol, candle.Timestamp.Format(time.RFC3339),
-		candle.OpenPrice, candle.ClosePrice, candle.Volume)
+	if s.debug {
+		log.Printf("Storing candle data for %s at %s: open=%s, close=%s, volume=%s",
+			symbol, candle.Timestamp.Format(time.RFC3339),
+			candle.OpenPrice, candle.ClosePrice, candle.Volume)
+	}
+
+	// Ensure timestamp is in UTC
+	timestamp := candle.Timestamp.UTC()
+	if timestamp.IsZero() {
+		return fmt.Errorf("invalid timestamp: zero value")
+	}
+
+	if s.debug {
+		log.Printf("Using UTC timestamp: %s for candle data", timestamp.Format(time.RFC3339))
+	}
 
 	result, err := s.db.ExecContext(ctx, `
 		INSERT INTO trade_candles (
@@ -119,7 +136,7 @@ func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, cand
 			close_price = EXCLUDED.close_price,
 			volume = trade_candles.volume + EXCLUDED.volume,
 			trade_count = trade_candles.trade_count + EXCLUDED.trade_count`,
-		symbol, candle.Timestamp, candle.OpenPrice,
+		symbol, timestamp, candle.OpenPrice,
 		candle.HighPrice, candle.LowPrice, candle.ClosePrice,
 		candle.Volume, candle.TradeCount,
 	)
@@ -130,10 +147,12 @@ func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, cand
 
 	rowsAffected, err := result.RowsAffected()
 	if err != nil {
-		log.Printf("Warning: couldn't get rows affected: %v", err)
-	} else {
+		if s.debug {
+			log.Printf("Warning: couldn't get rows affected: %v", err)
+		}
+	} else if s.debug {
 		log.Printf("Stored candle data for %s at %s: %d rows affected",
-			symbol, candle.Timestamp.Format(time.RFC3339), rowsAffected)
+			symbol, timestamp.Format(time.RFC3339), rowsAffected)
 	}
 
 	return nil
@@ -146,15 +165,44 @@ func (s *PostgresStore) GetHistoricalCandles(ctx context.Context, symbol string,
 			symbol, start.Format(time.RFC3339), end.Format(time.RFC3339))
 	}
 
+	// First check if any data exists for this symbol and get the time range
+	var count int
+	var minTime, maxTime sql.NullTime
+	err := s.db.QueryRowContext(ctx, `
+		SELECT COUNT(*), MIN(timestamp), MAX(timestamp) 
+		FROM trade_candles 
+		WHERE symbol = $1`,
+		symbol,
+	).Scan(&count, &minTime, &maxTime)
+
+	if err != nil {
+		if s.debug {
+			log.Printf("Error checking candle data for %s: %v", symbol, err)
+		}
+	} else if s.debug {
+		log.Printf("Found %d total candles for %s", count, symbol)
+		if count > 0 {
+			log.Printf("Data time range for %s: %s to %s",
+				symbol,
+				minTime.Time.Format(time.RFC3339),
+				maxTime.Time.Format(time.RFC3339))
+		}
+	}
+
 	// Get candles for the specified time range
-	rows, err := s.db.QueryContext(ctx, `
+	query := `
 		SELECT timestamp, open_price, high_price, low_price, 
 			   close_price, volume, trade_count
 		FROM trade_candles
 		WHERE symbol = $1 AND timestamp BETWEEN $2 AND $3
-		ORDER BY timestamp ASC`,
-		symbol, start, end,
-	)
+		ORDER BY timestamp ASC`
+
+	if s.debug {
+		log.Printf("Executing query: %s with params: symbol=%s, start=%s, end=%s",
+			query, symbol, start.Format(time.RFC3339), end.Format(time.RFC3339))
+	}
+
+	rows, err := s.db.QueryContext(ctx, query, symbol, start, end)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query historical candles: %w", err)
 	}
@@ -181,7 +229,7 @@ func (s *PostgresStore) GetHistoricalCandles(ctx context.Context, symbol string,
 	}
 
 	if s.debug {
-		log.Printf("Found %d historical candles for %s", len(candles), symbol)
+		log.Printf("Found %d historical candles for %s in the specified time range", len(candles), symbol)
 	}
 
 	return candles, rows.Err()
