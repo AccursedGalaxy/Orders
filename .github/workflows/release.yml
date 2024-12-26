@@ -51,6 +51,20 @@ jobs:
           GOOS=darwin GOARCH=amd64 go build -v -o bin/streamer-darwin-amd64 ./cmd/streamer
           GOOS=darwin GOARCH=amd64 go build -v -o bin/redis-viewer-darwin-amd64 ./cmd/redis-viewer
 
+      - name: Run tests
+        env:
+          CUSTOM_REDIS_URL: redis://localhost:6379/0
+          TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/test_db?sslmode=disable
+        run: |
+          go test -v -race -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          file: ./coverage.txt
+          fail_ci_if_error: true
+
       - name: Create archives
         run: |
           cd bin
