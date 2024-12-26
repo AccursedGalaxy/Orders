@@ -1,0 +1,55 @@
+name: Publish Release
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+jobs:
+  publish:
+    name: Publish Release
+    # Only run if PR is merged and it's a release PR
+    if: ${{ github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/v') }}
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Build binaries
+        run: |
+          mkdir -p bin
+          GOOS=linux GOARCH=amd64 go build -o bin/streamer-linux-amd64 ./cmd/streamer
+          GOOS=linux GOARCH=amd64 go build -o bin/redis-viewer-linux-amd64 ./cmd/redis-viewer
+          GOOS=darwin GOARCH=amd64 go build -o bin/streamer-darwin-amd64 ./cmd/streamer
+          GOOS=darwin GOARCH=amd64 go build -o bin/redis-viewer-darwin-amd64 ./cmd/redis-viewer
+          
+          cd bin
+          tar czf binance-redis-streamer-linux-amd64.tar.gz streamer-linux-amd64 redis-viewer-linux-amd64
+          tar czf binance-redis-streamer-darwin-amd64.tar.gz streamer-darwin-amd64 redis-viewer-darwin-amd64
+
+      - name: Get version from branch name
+        id: get_version
+        run: |
+          VERSION=${GITHUB_HEAD_REF#release/v}
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release v${{ steps.get_version.outputs.version }}
+          tag_name: v${{ steps.get_version.outputs.version }}
+          body_path: CHANGELOG.md
+          files: |
+            bin/binance-redis-streamer-linux-amd64.tar.gz
+            bin/binance-redis-streamer-darwin-amd64.tar.gz
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT_TOKEN }} 
