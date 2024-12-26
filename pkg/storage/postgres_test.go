@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"os"
+	"strconv"
 	"testing"
 	"time"
 
@@ -118,8 +119,14 @@ func TestPostgresStore_StoreCandleData(t *testing.T) {
 	if result.lowPrice != "48000.00" {
 		t.Errorf("Expected low price 48000.00, got %s", result.lowPrice)
 	}
-	if result.volume != "26.00" {
-		t.Errorf("Expected volume 26.00, got %s", result.volume)
+	// Convert volume to float for comparison to handle different decimal representations
+	expectedVol := 26.0
+	actualVol, err := strconv.ParseFloat(result.volume, 64)
+	if err != nil {
+		t.Fatalf("Failed to parse volume: %v", err)
+	}
+	if actualVol != expectedVol {
+		t.Errorf("Expected volume %.2f, got %s", expectedVol, result.volume)
 	}
 	if result.tradeCount != 250 {
 		t.Errorf("Expected trade count 250, got %d", result.tradeCount)
