@@ -78,7 +78,7 @@ jobs:
           # Use deploy key or PAT for authentication
           git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
           # Fetch all history and tags
-          git fetch --prune --unshallow --tags
+          git fetch --prune --tags
 
       - name: Prepare version
         id: version
