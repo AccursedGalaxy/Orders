@@ -107,8 +107,20 @@ jobs:
           output-file: 'CHANGELOG.md'
           skip-version-file: true
           skip-commit: true
+          skip-on-empty: false
+
+      - name: Check for changes
+        id: check_changes
+        run: |
+          if [ -f "CHANGELOG.md" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "No changes to release, skipping..."
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Commit changes
+        if: steps.check_changes.outputs.has_changes == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
@@ -123,6 +135,7 @@ jobs:
           git push --tags
 
       - name: Create Release
+        if: steps.check_changes.outputs.has_changes == 'true'
         uses: softprops/action-gh-release@v2
         with:
           name: Release v${{ env.VERSION }}
