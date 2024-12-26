@@ -70,6 +70,12 @@ jobs:
           file: ./coverage.txt
           fail_ci_if_error: true
 
+      - name: Clean existing tags
+        run: |
+          git fetch --tags
+          git tag -l | xargs git tag -d
+          git fetch --tags
+
       - name: Generate changelog
         id: changelog
         uses: TriPSs/conventional-changelog-action@v3
@@ -77,12 +83,22 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           version-file: './project.json'
           version-path: 'version'
-          git-message: 'chore(release): {version}'
+          git-message: 'chore(release): {version} [skip ci]'
           output-file: 'CHANGELOG.md'
           skip-version-file: false
           skip-commit: false
           skip-on-empty: false
           git-branch: main
+          pre-commit: |
+            # Get the latest version from git tags
+            LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+            LATEST_VERSION=${LATEST_TAG#v}
+            CURRENT_VERSION=$(jq -r .version project.json)
+            # If current version is less than or equal to latest tag, increment patch
+            if [ "$(printf '%s\n' "$LATEST_VERSION" "$CURRENT_VERSION" | sort -V | tail -n1)" != "$CURRENT_VERSION" ]; then
+              NEW_VERSION=$(echo $LATEST_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
+              jq ".version = \"$NEW_VERSION\"" project.json > project.json.tmp && mv project.json.tmp project.json
+            fi
 
       - name: Build binaries
         run: |
