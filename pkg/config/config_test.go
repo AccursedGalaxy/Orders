@@ -9,25 +9,29 @@ func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
 	// Test Redis defaults
-	if cfg.Redis.RetentionPeriod != 2*time.Hour {
-		t.Errorf("Expected RetentionPeriod to be 2h, got %v", cfg.Redis.RetentionPeriod)
+	if cfg.Redis.RetentionPeriod != 30*time.Minute {
+		t.Errorf("Expected RetentionPeriod to be 30m, got %v", cfg.Redis.RetentionPeriod)
 	}
 
-	if cfg.Redis.CleanupInterval != 5*time.Minute {
-		t.Errorf("Expected CleanupInterval to be 5m, got %v", cfg.Redis.CleanupInterval)
+	if cfg.Redis.CleanupInterval != 1*time.Minute {
+		t.Errorf("Expected CleanupInterval to be 1m, got %v", cfg.Redis.CleanupInterval)
 	}
 
 	if cfg.Redis.KeyPrefix != "binance:" {
 		t.Errorf("Expected KeyPrefix to be 'binance:', got %v", cfg.Redis.KeyPrefix)
 	}
 
-	if cfg.Redis.MaxTradesPerKey != 100000 {
-		t.Errorf("Expected MaxTradesPerKey to be 100000, got %d", cfg.Redis.MaxTradesPerKey)
+	if cfg.Redis.MaxTradesPerKey != 1000 {
+		t.Errorf("Expected MaxTradesPerKey to be 1000, got %d", cfg.Redis.MaxTradesPerKey)
+	}
+
+	if !cfg.Redis.UseCompression {
+		t.Error("Expected UseCompression to be true")
 	}
 
 	// Test Binance defaults
-	if cfg.Binance.MaxSymbols != 10 {
-		t.Errorf("Expected MaxSymbols to be 10, got %v", cfg.Binance.MaxSymbols)
+	if cfg.Binance.MaxSymbols != 5 {
+		t.Errorf("Expected MaxSymbols to be 5, got %v", cfg.Binance.MaxSymbols)
 	}
 
 	expectedSymbols := []string{"BTCUSDT", "ETHUSDT"}
@@ -40,8 +44,8 @@ func TestDefaultConfig(t *testing.T) {
 		}
 	}
 
-	if cfg.Binance.MinDailyVolume != 1000000.0 {
-		t.Errorf("Expected MinDailyVolume to be 1000000.0, got %v", cfg.Binance.MinDailyVolume)
+	if cfg.Binance.MinDailyVolume != 10000000.0 {
+		t.Errorf("Expected MinDailyVolume to be 10000000.0, got %v", cfg.Binance.MinDailyVolume)
 	}
 
 	// Test WebSocket defaults

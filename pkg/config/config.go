@@ -47,16 +47,17 @@ func DefaultConfig() *Config {
 	return &Config{
 		Redis: RedisConfig{
 			URL:             getEnvOrDefault("REDIS_URL", "redis://localhost:6379"),
-			RetentionPeriod: 2 * time.Hour,
-			CleanupInterval: 5 * time.Minute,
+			RetentionPeriod: 30 * time.Minute,
+			CleanupInterval: 1 * time.Minute,
 			KeyPrefix:       "binance:",
-			MaxTradesPerKey: 100000,
+			MaxTradesPerKey: 1000,
+			UseCompression:  true,
 		},
 		Binance: BinanceConfig{
 			BaseURL:           "https://api.binance.com",
-			MaxSymbols:        10,
+			MaxSymbols:        5,
 			MaxStreamsPerConn: 1000,
-			MinDailyVolume:    1000000, // 1M USDT
+			MinDailyVolume:    10000000,
 			MainSymbols:       []string{"BTCUSDT", "ETHUSDT"},
 		},
 		WebSocket: WebSocketConfig{
