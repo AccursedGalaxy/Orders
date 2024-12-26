@@ -46,10 +46,12 @@ jobs:
       - name: Build binaries
         run: |
           mkdir -p bin
-          GOOS=linux GOARCH=amd64 go build -v -o bin/streamer-linux-amd64 ./cmd/streamer
-          GOOS=linux GOARCH=amd64 go build -v -o bin/redis-viewer-linux-amd64 ./cmd/redis-viewer
-          GOOS=darwin GOARCH=amd64 go build -v -o bin/streamer-darwin-amd64 ./cmd/streamer
-          GOOS=darwin GOARCH=amd64 go build -v -o bin/redis-viewer-darwin-amd64 ./cmd/redis-viewer
+          # Build Linux binaries
+          GOOS=linux GOARCH=amd64 go build -o bin/streamer-linux-amd64 ./cmd/streamer
+          GOOS=linux GOARCH=amd64 go build -o bin/redis-viewer-linux-amd64 ./cmd/redis-viewer
+          # Build Darwin (macOS) binaries
+          GOOS=darwin GOARCH=amd64 go build -o bin/streamer-darwin-amd64 ./cmd/streamer
+          GOOS=darwin GOARCH=amd64 go build -o bin/redis-viewer-darwin-amd64 ./cmd/redis-viewer
 
       - name: Run tests
         env:
