@@ -75,6 +75,7 @@ jobs:
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git remote set-url origin "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git"
 
       - name: Prepare version
         id: version
@@ -103,6 +104,9 @@ jobs:
           # Stage and commit the project.json changes
           git add project.json
           git commit -m "chore: update version to $NEW_VERSION"
+          
+          # Push the temporary branch
+          git push -u origin $TEMP_BRANCH
 
       - name: Generate changelog
         id: changelog
