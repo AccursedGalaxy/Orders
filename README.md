@@ -6,37 +6,38 @@
 [![Go Version](https://img.shields.io/github/go-mod/go-version/AccursedGalaxy/Orders)](https://go.dev/)
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-A high-performance, real-time cryptocurrency trade data streaming application that collects and processes trade data from Binance. Built with Go, it offers multi-layer storage, real-time processing, and interactive visualization capabilities.
-
-> **Important License Notice**: This software is licensed under GPLv3, which means you can freely use and modify it for personal and open-source projects, but commercial use is restricted. Any modifications must be shared under the same license terms.
+A high-performance, real-time cryptocurrency trade data streaming application that collects and processes trade data from Binance. Built with Go, it features a hybrid storage architecture combining Redis for real-time data and PostgreSQL for historical storage, offering both speed and reliability.
 
 ## 🚀 Features
 
-- **Real-time Data Streaming**
-  - WebSocket connection to Binance API
-  - Automatic reconnection and error handling
-  - Configurable symbol selection and filtering
+- **Optimized Real-time Data Streaming**
+  - WebSocket connection to Binance API with automatic reconnection
+  - Smart symbol filtering based on volume and importance
+  - Configurable trade data compression and retention
+  - Memory-optimized storage with automatic cleanup
 
-- **Multi-layer Storage**
-  - Redis for high-speed recent data access
-  - PostgreSQL for reliable historical data storage
-  - Automatic data migration and cleanup
+- **Hybrid Storage Architecture**
+  - Redis for high-speed recent data (30-minute window)
+  - PostgreSQL for unlimited historical data storage
+  - Automatic data migration between layers
+  - Efficient data compression and cleanup
 
 - **Advanced Processing**
-  - Real-time trade aggregation into candles
-  - Customizable time intervals (1m, 5m, 15m, etc.)
+  - Real-time trade aggregation into 1-minute candles
   - Volume-weighted average price (VWAP) calculation
+  - Order book imbalance tracking
+  - Trade momentum analysis
 
-- **Interactive CLI**
-  - Real-time trade monitoring
-  - Historical data analysis
-  - Interactive price charts
-  - Comprehensive statistics
+- **Interactive CLI Tools**
+  - Real-time trade monitoring with customizable intervals
+  - Interactive price charts with technical indicators
+  - Historical data analysis and export
+  - Performance metrics and system monitoring
 
 ## 📋 Prerequisites
 
 - Go 1.21.5 or later
-- Redis 7.0 or later
+- Redis 7.0 or later (with at least 2GB memory)
 - PostgreSQL 16.0 or later
 - Make (for build automation)
 
@@ -53,7 +54,7 @@ A high-performance, real-time cryptocurrency trade data streaming application th
    go mod download
    ```
 
-3. **Build the Binaries**
+3. **Build the Project**
    ```bash
    make build
    ```
@@ -63,46 +64,68 @@ A high-performance, real-time cryptocurrency trade data streaming application th
 Create a `.env` file in the project root:
 
 ```env
-# Redis Configuration
+# Redis Configuration (Required)
 CUSTOM_REDIS_URL=redis://localhost:6379/0
-REDIS_KEY_PREFIX=binance:
+# For Heroku Redis (Optional)
+REDIS_URL=rediss://...
 
-# PostgreSQL Configuration
-DATABASE_URL=postgres://user:password@localhost:5432/dbname
-
-# Binance API Configuration
-MAX_SYMBOLS=10
-MIN_DAILY_VOLUME=1000000
-MAIN_SYMBOLS=BTCUSDT,ETHUSDT
+# PostgreSQL Configuration (Required)
+DATABASE_URL=postgres://user:password@localhost:5432/binance_trades
 
 # Application Settings
 DEBUG=false
-RETENTION_DAYS=7
-CLEANUP_INTERVAL=1h
 ```
 
-## 🚦 Usage
+### Advanced Configuration
 
-### Start the Streamer
+The application includes smart defaults optimized for both performance and resource usage:
 
+- Redis retention period: 30 minutes
+- Cleanup interval: 1 minute
+- Max trades per symbol: 1,000
+- Data compression: Enabled
+- Max tracked symbols: 5
+- Min daily volume: 10M USDT
+
+## 🚀 Deployment
+
+### Local Development
 ```bash
+# Start all services
+docker-compose up -d
+
+# Run the streamer
 ./bin/streamer
+
+# Monitor trades
+./bin/redis-viewer watch BTCUSDT ETHUSDT
 ```
 
-### CLI Commands
-
-#### Real-time Monitoring
+### Heroku Deployment
 ```bash
-# Watch multiple symbols
+# Deploy to Heroku
+heroku create
+git push heroku main
+
+# Add required add-ons
+heroku addons:create heroku-redis:premium-0
+heroku addons:create heroku-postgresql:standard-0
+```
+
+## 🎯 Usage
+
+### Real-time Monitoring
+```bash
+# Watch live trades with 2-second updates
 ./bin/redis-viewer watch BTCUSDT ETHUSDT --interval 2
 
 # View interactive chart
 ./bin/redis-viewer chart BTCUSDT --period 24h --port 8080
 ```
 
-#### Data Analysis
+### Historical Analysis
 ```bash
-# Get historical data
+# Get 7-day historical data in 5-minute candles
 ./bin/redis-viewer history BTCUSDT --period 7d --interval 5m
 
 # Export to CSV
@@ -116,97 +139,97 @@ graph TD
     A[Binance WebSocket] --> B[Data Ingestion Service]
     B --> C[Message Bus]
     C --> D[Redis Cache]
-    C --> E[Processing Service]
+    C --> E[Trade Aggregator]
     E --> F[PostgreSQL]
     D --> G[CLI Interface]
     F --> G
+    E --> H[Metrics Exporter]
+    H --> I[Prometheus/Grafana]
 ```
 
-### Components
+### Key Components
 
-1. **Data Ingestion Service**
-   - Handles WebSocket connections
-   - Implements automatic reconnection
-   - Manages connection pooling
+1. **Data Ingestion Service** (`pkg/ingestion`)
+   - Manages WebSocket connections and reconnection logic
+   - Filters and validates incoming trade data
+   - Implements rate limiting and backoff strategies
 
-2. **Processing Service**
-   - Aggregates trade data
-   - Calculates technical indicators
-   - Manages data retention
+2. **Trade Aggregator** (`pkg/storage`)
+   - Aggregates trades into 1-minute candles
+   - Manages data migration between Redis and PostgreSQL
+   - Handles data compression and cleanup
 
 3. **Storage Layer**
-   - Redis for real-time data
-   - PostgreSQL for historical data
-   - Automatic data migration
+   - Redis: 30-minute hot data window with compression
+   - PostgreSQL: Unlimited historical data storage
+   - Automatic cleanup and optimization
 
-## 📊 Performance
+4. **CLI Interface** (`pkg/cli`)
+   - Real-time monitoring tools
+   - Historical data analysis
+   - Interactive charting
 
-- Handles 1000+ trades per second
-- Sub-millisecond data processing
-- Efficient memory usage with configurable limits
-- Automatic cleanup of old data
+## 📊 Performance Optimization
+
+The system is optimized for both performance and resource usage:
+
+- **Memory Management**
+  - Configurable Redis memory limits
+  - Automatic data compression
+  - Smart symbol filtering
+  - Regular cleanup of old data
+
+- **Processing Efficiency**
+  - Batch processing of trades
+  - Optimized data structures
+  - Efficient PostgreSQL queries
+  - Connection pooling
 
 ## 🧪 Testing
 
-Run the test suite:
-
 ```bash
+# Run all tests
 make test
-```
 
-Run with race detection:
-
-```bash
+# Run with race detection
 make test-race
+
+# Run specific package tests
+go test ./pkg/storage/...
 ```
 
 ## 📈 Monitoring
 
-The application exposes metrics for Prometheus:
-
-- Trade processing latency
-- WebSocket connection status
-- Storage operation metrics
-- System resource usage
-
 Access metrics at: `http://localhost:2112/metrics`
+
+Available metrics:
+- Trade processing latency
+- Memory usage
+- Storage operations
+- WebSocket connection status
 
 ## 🤝 Contributing
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
 3. Run tests (`make test`)
-4. Commit your changes (`git commit -m 'feat: add amazing feature'`)
-5. Push to the branch (`git push origin feature/amazing-feature`)
+4. Commit changes (`git commit -m 'feat: add amazing feature'`)
+5. Push to branch (`git push origin feature/amazing-feature`)
 6. Open a Pull Request
-
-### Commit Convention
-
-We follow [Conventional Commits](https://www.conventionalcommits.org/):
-
-- `feat:` New features
-- `fix:` Bug fixes
-- `chore:` Maintenance tasks
-- `docs:` Documentation updates
-- `test:` Test updates
-- `refactor:` Code refactoring
-- `style:` Code style updates
-- `perf:` Performance improvements
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+Licensed under GPLv3 - see [LICENSE.md](LICENSE.md)
 
 ## 🙏 Acknowledgments
 
-- [Binance API](https://binance-docs.github.io/apidocs/) for the WebSocket feed
-- [Go Redis](https://redis.uptrace.dev/) for the Redis client
-- [lib/pq](https://github.com/lib/pq) for PostgreSQL support
-- [Cobra](https://github.com/spf13/cobra) for CLI interface
+- [Binance API](https://binance-docs.github.io/apidocs/)
+- [Go Redis](https://redis.uptrace.dev/)
+- [lib/pq](https://github.com/lib/pq)
+- [Cobra](https://github.com/spf13/cobra)
 
 ## 📞 Support
 
-For support, please:
-1. Check the [Issues](https://github.com/AccursedGalaxy/Orders/issues) page
-2. Open a new issue if needed
-3. Join our [Discord](https://discord.gg/your-invite) community
+- [Issues](https://github.com/AccursedGalaxy/Orders/issues)
+- [Discord Community](https://discord.gg/7vY9ZBPdya)
+- [Documentation Wiki](https://github.com/AccursedGalaxy/Orders/wiki)
