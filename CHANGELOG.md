@@ -1,3 +1,7 @@
+## [1.1.6](https://github.com/AccursedGalaxy/Orders/compare/v1.1.5...v1.1.6) (2024-12-26)
+
+
+
 ## [1.1.5](https://github.com/AccursedGalaxy/Orders/compare/v1.1.4...v1.1.5) (2024-12-26)
 
 
@@ -35,10 +39,6 @@
 
 
 ## [1.1.2](https://github.com/AccursedGalaxy/Orders/compare/v1.1.1...v1.1.2) (2024-12-24)
-
-
-
-## [1.1.1](https://github.com/AccursedGalaxy/Orders/compare/v1.1.0...v1.1.1) (2024-12-24)
 
 
 
