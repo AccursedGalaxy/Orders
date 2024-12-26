@@ -70,23 +70,19 @@ jobs:
           file: ./coverage.txt
           fail_ci_if_error: true
 
-      - name: Determine version bump
-        id: bump
-        run: |
-          COMMIT_MSG=$(git log -1 --pretty=%B)
-          if echo "$COMMIT_MSG" | grep -q "^BREAKING CHANGE"; then
-            echo "type=major" >> $GITHUB_OUTPUT
-          elif echo "$COMMIT_MSG" | grep -q "^feat"; then
-            echo "type=minor" >> $GITHUB_OUTPUT
-          else
-            echo "type=patch" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Bump version
-        run: |
-          go run cmd/version/main.go -bump ${{ steps.bump.outputs.type }}
-          VERSION=$(jq -r .version project.json)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+      - name: Generate changelog
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version-file: './project.json'
+          version-path: 'version'
+          git-message: 'chore(release): {version}'
+          output-file: 'CHANGELOG.md'
+          skip-version-file: false
+          skip-commit: false
+          skip-on-empty: false
+          git-branch: main
 
       - name: Build binaries
         run: |
@@ -104,64 +100,17 @@ jobs:
           tar czf binance-redis-streamer-linux-amd64.tar.gz streamer-linux-amd64 redis-viewer-linux-amd64
           tar czf binance-redis-streamer-darwin-amd64.tar.gz streamer-darwin-amd64 redis-viewer-darwin-amd64
 
-      - name: Generate changelog
-        id: changelog
-        uses: TriPSs/conventional-changelog-action@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          version-file: './project.json'
-          version-path: 'version'
-          git-message: 'chore(release): {version}'
-          output-file: 'CHANGELOG.md'
-          skip-version-file: true
-          skip-commit: true
-          skip-on-empty: false
-
-      - name: Check for changes
-        id: check_changes
-        run: |
-          if [ -f "CHANGELOG.md" ]; then
-            echo "has_changes=true" >> $GITHUB_OUTPUT
-          else
-            echo "No changes to release, skipping..."
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Commit changes
-        if: steps.check_changes.outputs.has_changes == 'true'
-        run: |
-          # Create a new branch for the release
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git checkout -b release/v${{ env.VERSION }}
-          
-          # Stage and commit changes
-          git add .
-          git commit -m "chore(release): v${{ env.VERSION }}"
-          
-          # Push the release branch
-          git push origin release/v${{ env.VERSION }}
-          
-          # Create Pull Request
-          gh pr create \
-            --title "chore(release): v${{ env.VERSION }}" \
-            --body "Automated release PR for version v${{ env.VERSION }}" \
-            --base main \
-            --head release/v${{ env.VERSION }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Create Release
-        if: steps.check_changes.outputs.has_changes == 'true'
+        if: steps.changelog.outputs.skipped == 'false'
         uses: softprops/action-gh-release@v2
         with:
-          name: Release v${{ env.VERSION }}
-          tag_name: v${{ env.VERSION }}
+          name: Release ${{ steps.changelog.outputs.tag }}
+          tag_name: ${{ steps.changelog.outputs.tag }}
           body_path: CHANGELOG.md
           files: |
             bin/binance-redis-streamer-linux-amd64.tar.gz
             bin/binance-redis-streamer-darwin-amd64.tar.gz
-          draft: true  # Create as draft until PR is merged
+          draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
