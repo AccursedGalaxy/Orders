@@ -11,7 +11,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/spf13/cobra"
 
 	"binance-redis-streamer/internal/models"
@@ -32,6 +31,30 @@ type symbolMetrics struct {
 	lastTradeTime time.Time
 	tradesPerMin  float64
 	initialized   bool
+
+	// Price action metrics
+	priceRange    float64 // 24h range as percentage
+	rangePosition float64 // Where in the range current price sits (0-100%)
+	volatility    float64 // Standard deviation of returns
+	vwapDev       float64 // Deviation from VWAP as percentage
+
+	// Volume metrics
+	relativeVol float64 // Current volume relative to 24h average
+	volMomentum float64 // Volume trend (positive = increasing)
+
+	// Trade metrics
+	avgTradeSize   float64 // Average trade size
+	largeTradesPct float64 // Percentage of volume from large trades
+	tradeAccel     float64 // Trade frequency acceleration
+
+	// Market microstructure
+	orderImbalance float64 // Buy volume - Sell volume / Total volume
+	marketImpact   float64 // Price movement per unit of volume
+
+	// Historical data for calculations
+	recentPrices  []float64
+	recentVolumes []float64
+	recentTrades  []float64
 }
 
 func newWatchCmd() *cobra.Command {
@@ -132,10 +155,7 @@ Example: binance-cli watch BTCUSDT ETHUSDT`,
 
 func printHeader() {
 	fmt.Println("Press Ctrl+C to exit")
-	fmt.Println(strings.Repeat("─", 140))
-	fmt.Printf("%-10s %-12s %-10s %-10s %-10s %-10s %-12s %-12s %-12s %-15s %-10s\n",
-		"Symbol", "Price", "Change%", "High", "Low", "VWAP", "Volume", "Buy Vol%", "Trades/min", "Updated", "Trend")
-	fmt.Println(strings.Repeat("─", 140))
+	fmt.Println()
 }
 
 func formatFloat(f float64, decimals int) string {
@@ -271,53 +291,98 @@ func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, sym
 	}
 	m.tradesPerMin = float64(tradeCount) / 1440 // trades per minute
 
-	// Display metrics
+	// Calculate advanced metrics
+	if totalVolume > 0 {
+		// Price action metrics
+		m.priceRange = ((m.high24h - m.low24h) / m.low24h) * 100
+		m.rangePosition = ((m.lastPrice - m.low24h) / (m.high24h - m.low24h)) * 100
+		m.vwapDev = ((m.lastPrice - m.vwap) / m.vwap) * 100
+
+		// Calculate volatility (standard deviation of returns)
+		var returns []float64
+		for i := 1; i < len(m.recentPrices); i++ {
+			ret := (m.recentPrices[i] - m.recentPrices[i-1]) / m.recentPrices[i-1]
+			returns = append(returns, ret)
+		}
+		m.volatility = calculateStdDev(returns) * 100
+
+		// Volume metrics
+		avgVolume := totalVolume / float64(tradeCount)
+		m.avgTradeSize = avgVolume
+		m.volMomentum = calculateVolumeMomentum(m.recentVolumes)
+
+		// Market microstructure
+		m.orderImbalance = (buyVol - sellVol) / totalVolume
+		m.marketImpact = math.Abs(m.lastPrice-m.prevPrice) / totalVolume
+		m.tradeAccel = calculateTradeAcceleration(m.recentTrades)
+
+		// Update historical data
+		m.recentPrices = append(m.recentPrices, m.lastPrice)
+		if len(m.recentPrices) > 100 {
+			m.recentPrices = m.recentPrices[1:]
+		}
+	}
+
+	// Calculate price change
 	priceChange := 0.0
 	if m.prevPrice > 0 {
 		priceChange = ((m.lastPrice - m.prevPrice) / m.prevPrice) * 100
 	}
 
-	// Calculate market buy percentage
+	// Calculate buy percentage
 	buyPercent := 0.0
 	if totalVolume > 0 {
 		buyPercent = (buyVol / totalVolume) * 100
-		if cfg.Debug {
-			log.Printf("\nMarket Buy percentage: %.8f / %.8f * 100 = %.8f%% (percentage of volume from market buy orders)",
-				buyVol, totalVolume, buyPercent)
-		}
 	}
 
-	// Color coding
-	priceColor := color.New(color.FgWhite)
-	if priceChange > 0 {
-		priceColor = color.New(color.FgGreen)
-	} else if priceChange < 0 {
-		priceColor = color.New(color.FgRed)
-	}
+	// Header with symbol and timestamp
+	fmt.Printf("─── %s %s%s %s ───\n",
+		strings.ToUpper(symbol),
+		formatFloat(m.lastPrice, 2),
+		formatPriceChange(priceChange),
+		m.lastTradeTime.Format("15:04:05"))
 
-	// Trend indicator
-	trend := "─"
-	if priceChange > 0.1 {
-		trend = "↗"
-	} else if priceChange < -0.1 {
-		trend = "↘"
-	}
-
-	fmt.Printf("%-10s ", strings.ToUpper(symbol))
-	priceColor.Printf("%-12s ", formatFloat(m.lastPrice, 2))
-	priceColor.Printf("%-10s ", formatFloat(priceChange, 2))
-	fmt.Printf("%-10s %-10s %-10s %-12s %-12s %-12s %-15s %s\n",
-		formatFloat(m.high24h, 2),
+	// Price information
+	fmt.Printf("24h Range: %s - %s    VWAP: %s\n",
 		formatFloat(m.low24h, 2),
-		formatFloat(m.vwap, 2),
-		formatFloat(totalVolume, 4),
-		formatFloat(buyPercent, 1), // Show market buy percentage
-		formatFloat(m.tradesPerMin, 1),
-		m.lastTradeTime.Format("15:04:05"),
-		trend,
-	)
+		formatFloat(m.high24h, 2),
+		formatFloat(m.vwap, 2))
+
+	fmt.Println()
+
+	// Left column
+	fmt.Printf("Volume (24h):     %s\n", formatFloat(totalVolume, 4))
+	fmt.Printf("Buy Volume:       %.1f%%\n", buyPercent)
+	fmt.Printf("Avg Trade Size:   %s\n", formatFloat(m.avgTradeSize, 4))
+	fmt.Printf("Trades/min:       %.1f\n", m.tradesPerMin)
+
+	fmt.Println()
+
+	// Right column
+	fmt.Printf("Price Range:      %.2f%%\n", m.priceRange)
+	fmt.Printf("Range Position:   %.1f%%\n", m.rangePosition)
+	fmt.Printf("Volatility:       %.2f%%\n", m.volatility)
+	fmt.Printf("VWAP Deviation:   %.2f%%\n", m.vwapDev)
+
+	fmt.Println()
+
+	// Market metrics
+	fmt.Printf("Order Imbalance:  %.1f%%\n", m.orderImbalance*100)
+	fmt.Printf("Market Impact:    %.6f\n", m.marketImpact)
+	fmt.Printf("Volume Momentum:  %.2f%%\n", m.volMomentum)
+	fmt.Printf("Trade Accel:      %.1f%%\n", m.tradeAccel)
+
+	fmt.Printf("%s\n\n", strings.Repeat("─", 50))
 
 	return nil
+}
+
+// formatPriceChange formats the price change with color and direction
+func formatPriceChange(change float64) string {
+	if change > 0 {
+		return fmt.Sprintf(" +%.2f%%", change)
+	}
+	return fmt.Sprintf(" %.2f%%", change)
 }
 
 // interpretTrade provides a human-readable interpretation of a trade
@@ -336,4 +401,71 @@ func displayTrade(trade *models.Trade) {
 		trade.Quantity,
 		trade.Time.Format("15:04:05"),
 	)
+}
+
+func calculateStdDev(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+
+	// Calculate mean
+	var sum float64
+	for _, v := range values {
+		sum += v
+	}
+	mean := sum / float64(len(values))
+
+	// Calculate variance
+	var variance float64
+	for _, v := range values {
+		diff := v - mean
+		variance += diff * diff
+	}
+	variance /= float64(len(values))
+
+	return math.Sqrt(variance)
+}
+
+func calculateVolumeMomentum(volumes []float64) float64 {
+	if len(volumes) < 2 {
+		return 0
+	}
+
+	// Simple momentum: ratio of recent volume to earlier volume
+	recentAvg := average(volumes[len(volumes)/2:])
+	earlierAvg := average(volumes[:len(volumes)/2])
+
+	if earlierAvg == 0 {
+		return 0
+	}
+
+	return (recentAvg - earlierAvg) / earlierAvg * 100
+}
+
+func calculateTradeAcceleration(trades []float64) float64 {
+	if len(trades) < 3 {
+		return 0
+	}
+
+	// Calculate rate of change in trade frequency
+	recent := average(trades[len(trades)/2:])
+	earlier := average(trades[:len(trades)/2])
+
+	if earlier == 0 {
+		return 0
+	}
+
+	return (recent - earlier) / earlier * 100
+}
+
+func average(values []float64) float64 {
+	if len(values) == 0 {
+		return 0
+	}
+
+	var sum float64
+	for _, v := range values {
+		sum += v
+	}
+	return sum / float64(len(values))
 }
