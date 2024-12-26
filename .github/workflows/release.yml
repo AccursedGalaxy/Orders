@@ -147,8 +147,7 @@ jobs:
             --title "chore(release): v${{ env.VERSION }}" \
             --body "Automated release PR for version v${{ env.VERSION }}" \
             --base main \
-            --head release/v${{ env.VERSION }} \
-            --label "release"
+            --head release/v${{ env.VERSION }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

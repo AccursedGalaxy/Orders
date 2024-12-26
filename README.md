@@ -4,9 +4,11 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/AccursedGalaxy/Orders)](https://goreportcard.com/report/github.com/AccursedGalaxy/Orders)
 [![codecov](https://codecov.io/gh/AccursedGalaxy/Orders/branch/main/graph/badge.svg)](https://codecov.io/gh/AccursedGalaxy/Orders)
 [![Go Version](https://img.shields.io/github/go-mod/go-version/AccursedGalaxy/Orders)](https://go.dev/)
-[![License](https://img.shields.io/github/license/AccursedGalaxy/Orders)](LICENSE)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
 A high-performance, real-time cryptocurrency trade data streaming application that collects and processes trade data from Binance. Built with Go, it offers multi-layer storage, real-time processing, and interactive visualization capabilities.
+
+> **Important License Notice**: This software is licensed under GPLv3, which means you can freely use and modify it for personal and open-source projects, but commercial use is restricted. Any modifications must be shared under the same license terms.
 
 ## 🚀 Features
 
