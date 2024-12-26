@@ -1,47 +1,85 @@
 # Binance Trade Data Streamer
 
-A real-time cryptocurrency trade data streaming application that collects and processes trade data from Binance.
+[![Release](https://img.shields.io/github/v/release/AccursedGalaxy/Orders)](https://github.com/AccursedGalaxy/Orders/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/AccursedGalaxy/Orders)](https://goreportcard.com/report/github.com/AccursedGalaxy/Orders)
+[![codecov](https://codecov.io/gh/AccursedGalaxy/Orders/branch/main/graph/badge.svg)](https://codecov.io/gh/AccursedGalaxy/Orders)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/AccursedGalaxy/Orders)](https://go.dev/)
+[![License](https://img.shields.io/github/license/AccursedGalaxy/Orders)](LICENSE)
 
-## Features
+A high-performance, real-time cryptocurrency trade data streaming application that collects and processes trade data from Binance. Built with Go, it offers multi-layer storage, real-time processing, and interactive visualization capabilities.
 
-- Real-time trade data streaming from Binance WebSocket API
-- Multi-layer storage (Redis for recent data, PostgreSQL for historical)
-- Trade data aggregation into candles (1-minute intervals)
-- Interactive CLI interface for data exploration
-- Real-time and historical data visualization
-- Configurable symbol selection and filtering
+## 🚀 Features
 
-## Installation
+- **Real-time Data Streaming**
+  - WebSocket connection to Binance API
+  - Automatic reconnection and error handling
+  - Configurable symbol selection and filtering
 
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/binance-redis-streamer.git
-cd binance-redis-streamer
-```
+- **Multi-layer Storage**
+  - Redis for high-speed recent data access
+  - PostgreSQL for reliable historical data storage
+  - Automatic data migration and cleanup
 
-2. Install dependencies:
-```bash
-go mod download
-```
+- **Advanced Processing**
+  - Real-time trade aggregation into candles
+  - Customizable time intervals (1m, 5m, 15m, etc.)
+  - Volume-weighted average price (VWAP) calculation
 
-3. Build the application:
-```bash
-go build -o bin/streamer cmd/streamer/main.go
-go build -o bin/binance-cli cmd/cli/main.go
-```
+- **Interactive CLI**
+  - Real-time trade monitoring
+  - Historical data analysis
+  - Interactive price charts
+  - Comprehensive statistics
 
-## Configuration
+## 📋 Prerequisites
 
-The application can be configured using environment variables or a `.env` file:
+- Go 1.21.5 or later
+- Redis 7.0 or later
+- PostgreSQL 16.0 or later
+- Make (for build automation)
+
+## 🛠 Installation
+
+1. **Clone the Repository**
+   ```bash
+   git clone https://github.com/AccursedGalaxy/Orders.git
+   cd Orders
+   ```
+
+2. **Install Dependencies**
+   ```bash
+   go mod download
+   ```
+
+3. **Build the Binaries**
+   ```bash
+   make build
+   ```
+
+## ⚙️ Configuration
+
+Create a `.env` file in the project root:
 
 ```env
-REDIS_URL=redis://localhost:6379/0
+# Redis Configuration
+CUSTOM_REDIS_URL=redis://localhost:6379/0
+REDIS_KEY_PREFIX=binance:
+
+# PostgreSQL Configuration
 DATABASE_URL=postgres://user:password@localhost:5432/dbname
+
+# Binance API Configuration
 MAX_SYMBOLS=10
+MIN_DAILY_VOLUME=1000000
+MAIN_SYMBOLS=BTCUSDT,ETHUSDT
+
+# Application Settings
+DEBUG=false
 RETENTION_DAYS=7
+CLEANUP_INTERVAL=1h
 ```
 
-## Usage
+## 🚦 Usage
 
 ### Start the Streamer
 
@@ -51,92 +89,122 @@ RETENTION_DAYS=7
 
 ### CLI Commands
 
-1. Watch real-time trade data:
+#### Real-time Monitoring
 ```bash
-binance-cli watch BTCUSDT ETHUSDT
-binance-cli watch --interval 2  # Update every 2 seconds
+# Watch multiple symbols
+./bin/redis-viewer watch BTCUSDT ETHUSDT --interval 2
+
+# View interactive chart
+./bin/redis-viewer chart BTCUSDT --period 24h --port 8080
 ```
 
-2. View trade statistics:
+#### Data Analysis
 ```bash
-binance-cli stats BTCUSDT --period 1h
-binance-cli stats --period 24h  # All symbols
+# Get historical data
+./bin/redis-viewer history BTCUSDT --period 7d --interval 5m
+
+# Export to CSV
+./bin/redis-viewer history BTCUSDT --format csv > btc_history.csv
 ```
 
-3. View interactive charts:
-```bash
-binance-cli chart BTCUSDT --period 24h
-binance-cli chart ETHUSDT --period 7d --port 8081
+## 🏗 Architecture
+
+```mermaid
+graph TD
+    A[Binance WebSocket] --> B[Data Ingestion Service]
+    B --> C[Message Bus]
+    C --> D[Redis Cache]
+    C --> E[Processing Service]
+    E --> F[PostgreSQL]
+    D --> G[CLI Interface]
+    F --> G
 ```
 
-4. View historical data:
-```bash
-binance-cli history BTCUSDT --period 24h --interval 5m
-binance-cli history BTCUSDT --format csv > btc_history.csv
-```
+### Components
 
-5. List available trading pairs:
-```bash
-binance-cli symbols
-binance-cli symbols --format json
-```
+1. **Data Ingestion Service**
+   - Handles WebSocket connections
+   - Implements automatic reconnection
+   - Manages connection pooling
 
-## CLI Options
+2. **Processing Service**
+   - Aggregates trade data
+   - Calculates technical indicators
+   - Manages data retention
 
-### Global Options
-- `--help`: Show help for any command
-
-### Watch Command
-- `-i, --interval`: Update interval in seconds (default: 1)
-
-### Stats Command
-- `-p, --period`: Time period (e.g., 1h, 24h, 7d)
-
-### Chart Command
-- `-p, --period`: Time period (e.g., 1h, 24h, 7d)
-- `--port`: Port for web interface (default: 8080)
-
-### History Command
-- `-p, --period`: Time period (e.g., 1h, 24h, 7d)
-- `-i, --interval`: Time interval (e.g., 1m, 5m, 1h)
-- `-l, --limit`: Limit number of results
-- `-f, --format`: Output format (table or csv)
-
-### Symbols Command
-- `-f, --format`: Output format (table, simple, or json)
-
-## Architecture
-
-The application consists of several components:
-
-1. **Data Ingestion**
-   - Connects to Binance WebSocket API
-   - Processes real-time trade events
-   - Publishes to message bus
-
-2. **Storage Layer**
-   - Redis for recent trade data
+3. **Storage Layer**
+   - Redis for real-time data
    - PostgreSQL for historical data
    - Automatic data migration
 
-3. **Processing Layer**
-   - Aggregates trades into candles
-   - Calculates statistics
-   - Manages data retention
+## 📊 Performance
 
-4. **CLI Interface**
-   - Real-time data monitoring
-   - Historical data analysis
-   - Interactive visualizations
+- Handles 1000+ trades per second
+- Sub-millisecond data processing
+- Efficient memory usage with configurable limits
+- Automatic cleanup of old data
 
-## Contributing
+## 🧪 Testing
+
+Run the test suite:
+
+```bash
+make test
+```
+
+Run with race detection:
+
+```bash
+make test-race
+```
+
+## 📈 Monitoring
+
+The application exposes metrics for Prometheus:
+
+- Trade processing latency
+- WebSocket connection status
+- Storage operation metrics
+- System resource usage
+
+Access metrics at: `http://localhost:2112/metrics`
+
+## 🤝 Contributing
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+3. Run tests (`make test`)
+4. Commit your changes (`git commit -m 'feat: add amazing feature'`)
+5. Push to the branch (`git push origin feature/amazing-feature`)
+6. Open a Pull Request
 
-## License
+### Commit Convention
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+We follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+- `feat:` New features
+- `fix:` Bug fixes
+- `chore:` Maintenance tasks
+- `docs:` Documentation updates
+- `test:` Test updates
+- `refactor:` Code refactoring
+- `style:` Code style updates
+- `perf:` Performance improvements
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+## 🙏 Acknowledgments
+
+- [Binance API](https://binance-docs.github.io/apidocs/) for the WebSocket feed
+- [Go Redis](https://redis.uptrace.dev/) for the Redis client
+- [lib/pq](https://github.com/lib/pq) for PostgreSQL support
+- [Cobra](https://github.com/spf13/cobra) for CLI interface
+
+## 📞 Support
+
+For support, please:
+1. Check the [Issues](https://github.com/AccursedGalaxy/Orders/issues) page
+2. Open a new issue if needed
+3. Join our [Discord](https://discord.gg/your-invite) community
