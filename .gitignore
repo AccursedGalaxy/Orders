@@ -8,6 +8,14 @@
 *.so
 *.dylib
 
+# Binary builds
+bin/
+*-linux-amd64
+*-darwin-amd64
+*-windows-amd64
+streamer
+redis-viewer
+
 # Test binary, built with `go test -c`
 *.test
 
