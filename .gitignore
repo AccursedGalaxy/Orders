@@ -32,6 +32,7 @@ logs/
 
 # Environment files
 .env
+.env.bak
 .env.local
 
 # Virtual Enviroments
