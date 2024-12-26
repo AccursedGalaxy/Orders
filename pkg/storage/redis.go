@@ -136,14 +136,34 @@ func (s *RedisStore) StoreTrade(ctx context.Context, trade *models.Trade) error 
 		}
 	}
 
-	// Update 24h volume (do this asynchronously to not block the trade storage)
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := s.Update24hVolume(ctx, trade.Symbol); err != nil && s.config.Debug {
-			log.Printf("Warning: failed to update 24h volume for %s: %v", trade.Symbol, err)
-		}
-	}()
+	// Update running volume in Redis
+	volumeKey := fmt.Sprintf("%s%s:volume:running", s.config.Redis.KeyPrefix, strings.ToUpper(trade.Symbol))
+	price, _ := strconv.ParseFloat(trade.Price, 64)
+	quantity, _ := strconv.ParseFloat(trade.Quantity, 64)
+	tradeVolume := price * quantity
+
+	// Atomically update running volume
+	pipe := s.client.Pipeline()
+	pipe.IncrByFloat(ctx, volumeKey, tradeVolume)
+	pipe.Expire(ctx, volumeKey, 24*time.Hour)
+	if _, err := pipe.Exec(ctx); err != nil {
+		log.Printf("Warning: failed to update running volume: %v", err)
+	}
+
+	// Trigger volume update less frequently (every 5 minutes per symbol)
+	updateKey := fmt.Sprintf("%s%s:volume:last_update", s.config.Redis.KeyPrefix, strings.ToUpper(trade.Symbol))
+	needsUpdate, err := s.client.SetNX(ctx, updateKey, time.Now().Unix(), 5*time.Minute).Result()
+	if err != nil {
+		log.Printf("Warning: failed to check last update time: %v", err)
+	} else if needsUpdate {
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := s.Update24hVolume(ctx, trade.Symbol); err != nil && s.config.Debug {
+				log.Printf("Warning: failed to update 24h volume for %s: %v", trade.Symbol, err)
+			}
+		}()
+	}
 
 	return nil
 }
@@ -302,6 +322,28 @@ func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, 
 
 // Update24hVolume calculates and stores the 24-hour volume for a symbol
 func (s *RedisStore) Update24hVolume(ctx context.Context, symbol string) error {
+	volumeKey := fmt.Sprintf("%s%s:volume:24h", s.config.Redis.KeyPrefix, strings.ToUpper(symbol))
+
+	// Use Redis lock to prevent concurrent updates
+	lockKey := fmt.Sprintf("%s%s:volume:lock", s.config.Redis.KeyPrefix, strings.ToUpper(symbol))
+	locked, err := s.client.SetNX(ctx, lockKey, "1", 30*time.Second).Result()
+	if err != nil {
+		return fmt.Errorf("failed to acquire lock: %w", err)
+	}
+	if !locked {
+		return nil // Another process is updating the volume
+	}
+	defer s.client.Del(ctx, lockKey)
+
+	// Check if we need to update (volume key doesn't exist or is about to expire)
+	ttl, err := s.client.TTL(ctx, volumeKey).Result()
+	if err != nil && err != redis.Nil {
+		return fmt.Errorf("failed to get volume TTL: %w", err)
+	}
+	if ttl > 30*time.Second {
+		return nil // Volume is fresh enough
+	}
+
 	// Get trades from the last 24 hours
 	end := time.Now()
 	start := end.Add(-24 * time.Hour)
@@ -325,11 +367,14 @@ func (s *RedisStore) Update24hVolume(ctx context.Context, symbol string) error {
 		totalVolume += quantity * price
 	}
 
-	// Store the volume with 1-hour expiry (to ensure regular updates)
-	volumeKey := fmt.Sprintf("%s%s:volume:24h", s.config.Redis.KeyPrefix, strings.ToUpper(symbol))
-	err = s.client.Set(ctx, volumeKey, fmt.Sprintf("%.2f", totalVolume), 1*time.Hour).Err()
+	// Store the volume with 5-minute expiry
+	err = s.client.Set(ctx, volumeKey, fmt.Sprintf("%.2f", totalVolume), 5*time.Minute).Err()
 	if err != nil {
 		return fmt.Errorf("failed to store 24h volume: %w", err)
+	}
+
+	if s.config.Debug {
+		log.Printf("Updated 24h volume for %s: %.2f", symbol, totalVolume)
 	}
 
 	return nil
