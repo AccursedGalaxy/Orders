@@ -114,6 +114,10 @@ jobs:
           git config --local user.name "GitHub Action"
           git add project.json CHANGELOG.md
           git commit -m "chore(release): v${{ env.VERSION }}"
+          # Delete existing tag if it exists
+          git tag -d "v${{ env.VERSION }}" || true
+          git push origin ":refs/tags/v${{ env.VERSION }}" || true
+          # Create and push new tag
           git tag -a "v${{ env.VERSION }}" -m "Release v${{ env.VERSION }}"
           git push
           git push --tags
