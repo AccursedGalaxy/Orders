@@ -97,6 +97,43 @@ func (s *RedisStore) StoreTrade(ctx context.Context, trade *models.Trade) error 
 		return fmt.Errorf("failed to store latest trade: %w", err)
 	}
 
+	// Store in history
+	historyKey := fmt.Sprintf("%strade:%s:history", s.config.Redis.KeyPrefix, strings.ToUpper(trade.Symbol))
+	
+	// Create AggTradeEvent from Trade
+	event := models.AggTradeEvent{
+		Stream: fmt.Sprintf("%s@trade", strings.ToLower(trade.Symbol)),
+		Data: models.TradeData{
+			EventType:     "trade",
+			EventTime:     trade.EventTime.UnixMilli(),
+			Symbol:        trade.Symbol,
+			TradeID:      trade.TradeID,
+			Price:        trade.Price,
+			Quantity:     trade.Quantity,
+			TradeTime:    trade.Time.UnixMilli(),
+		},
+	}
+
+	eventData, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("failed to marshal trade event: %w", err)
+	}
+
+	// Add to sorted set with score as timestamp in milliseconds
+	if err := s.client.ZAdd(ctx, historyKey, &redis.Z{
+		Score:  float64(trade.Time.UnixMilli()),
+		Member: string(eventData),
+	}).Err(); err != nil {
+		return fmt.Errorf("failed to store trade history: %w", err)
+	}
+
+	// Trim old trades
+	if err := s.trimHistory(ctx, historyKey); err != nil {
+		if s.config.Debug {
+			log.Printf("Warning: failed to trim history: %v", err)
+		}
+	}
+
 	return nil
 }
 

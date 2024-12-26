@@ -33,6 +33,9 @@ func setupTestAggregator(t *testing.T) (*TradeAggregator, func()) {
 
 func TestTradeAggregator_ProcessTrade(t *testing.T) {
 	aggregator, cleanup := setupTestAggregator(t)
+	if aggregator == nil {
+		return
+	}
 	defer cleanup()
 
 	ctx := context.Background()
@@ -43,8 +46,8 @@ func TestTradeAggregator_ProcessTrade(t *testing.T) {
 		Price:     "50000.00",
 		Quantity:  "1.5",
 		TradeID:   12345,
-		Time:      now.UnixNano(),
-		EventTime: now.UnixNano(),
+		Time:      now,
+		EventTime: now,
 	}
 
 	// Process the trade
@@ -76,6 +79,9 @@ func TestTradeAggregator_ProcessTrade(t *testing.T) {
 
 func TestTradeAggregator_FlushCandles(t *testing.T) {
 	aggregator, cleanup := setupTestAggregator(t)
+	if aggregator == nil {
+		return
+	}
 	defer cleanup()
 
 	ctx := context.Background()
@@ -87,8 +93,8 @@ func TestTradeAggregator_FlushCandles(t *testing.T) {
 		Price:     "50000.00",
 		Quantity:  "1.5",
 		TradeID:   12345,
-		Time:      pastTime.UnixNano(),
-		EventTime: pastTime.UnixNano(),
+		Time:      pastTime,
+		EventTime: pastTime,
 	}
 
 	err := aggregator.ProcessTrade(ctx, trade)

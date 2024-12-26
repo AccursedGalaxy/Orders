@@ -22,11 +22,11 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Test Binance defaults
-	if cfg.Binance.MaxSymbols != 5 {
-		t.Errorf("Expected MaxSymbols to be 5, got %v", cfg.Binance.MaxSymbols)
+	if cfg.Binance.MaxSymbols != 10 {
+		t.Errorf("Expected MaxSymbols to be 10, got %v", cfg.Binance.MaxSymbols)
 	}
 
-	expectedSymbols := []string{"BTCUSDT", "ETHUSDT", "BNBUSDT"}
+	expectedSymbols := []string{"BTCUSDT", "ETHUSDT"}
 	if len(cfg.Binance.MainSymbols) != len(expectedSymbols) {
 		t.Errorf("Expected MainSymbols to be %v, got %v", expectedSymbols, cfg.Binance.MainSymbols)
 	}
@@ -38,6 +38,15 @@ func TestDefaultConfig(t *testing.T) {
 
 	if cfg.Binance.MinDailyVolume != 1000000.0 {
 		t.Errorf("Expected MinDailyVolume to be 1000000.0, got %v", cfg.Binance.MinDailyVolume)
+	}
+
+	// Test WebSocket defaults
+	if cfg.WebSocket.PingInterval != time.Minute {
+		t.Errorf("Expected PingInterval to be 1m, got %v", cfg.WebSocket.PingInterval)
+	}
+
+	if cfg.WebSocket.ReconnectDelay != 5*time.Second {
+		t.Errorf("Expected ReconnectDelay to be 5s, got %v", cfg.WebSocket.ReconnectDelay)
 	}
 }
 

@@ -12,8 +12,8 @@ func TestNewCandle(t *testing.T) {
 		Price:     "50000.00",
 		Quantity:  "1.5",
 		TradeID:   12345,
-		Time:      timestamp.UnixNano(),
-		EventTime: timestamp.UnixNano(),
+		Time:      timestamp,
+		EventTime: timestamp,
 	}
 
 	candle := NewCandle(timestamp)
@@ -22,6 +22,7 @@ func TestNewCandle(t *testing.T) {
 	tests := []struct {
 		name     string
 		field    string
+		
 		got      string
 		expected string
 	}{
@@ -55,24 +56,24 @@ func TestCandleUpdate(t *testing.T) {
 			Price:     "50000.00",
 			Quantity:  "1.0",
 			TradeID:   1,
-			Time:      timestamp.UnixNano(),
-			EventTime: timestamp.UnixNano(),
+			Time:      timestamp,
+			EventTime: timestamp,
 		},
 		{
 			Symbol:    "BTCUSDT",
 			Price:     "51000.00",
 			Quantity:  "2.0",
 			TradeID:   2,
-			Time:      timestamp.UnixNano(),
-			EventTime: timestamp.UnixNano(),
+			Time:      timestamp,
+			EventTime: timestamp,
 		},
 		{
 			Symbol:    "BTCUSDT",
 			Price:     "49000.00",
 			Quantity:  "1.5",
 			TradeID:   3,
-			Time:      timestamp.UnixNano(),
-			EventTime: timestamp.UnixNano(),
+			Time:      timestamp,
+			EventTime: timestamp,
 		},
 	}
 
