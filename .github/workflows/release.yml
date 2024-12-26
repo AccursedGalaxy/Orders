@@ -74,13 +74,11 @@ jobs:
         run: |
           git config --global user.email "action@github.com"
           git config --global user.name "GitHub Action"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
       - name: Prepare version
         id: version
         run: |
-          # Ensure we're on the main branch
-          git checkout main
-          
           # Get the latest version from git tags
           git fetch --tags --force
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
@@ -98,6 +96,10 @@ jobs:
             echo "{\"version\": \"$NEW_VERSION\"}" > project.json
           fi
           
+          # Stage the project.json changes
+          git add project.json
+          git commit -m "chore: update version to $NEW_VERSION"
+          
           # Create and switch to release branch
           git checkout -b release/v$NEW_VERSION
 
@@ -110,7 +112,7 @@ jobs:
           version-path: 'version'
           git-message: 'chore(release): {version}'
           output-file: 'CHANGELOG.md'
-          skip-version-file: false
+          skip-version-file: true
           skip-commit: false
           skip-on-empty: false
           git-branch: release/v${{ env.NEW_VERSION }}
@@ -118,6 +120,7 @@ jobs:
           preset: 'angular'
           tag-prefix: 'v'
           release-count: 0
+          config-file-path: '.versionrc'
 
       - name: Build binaries
         run: |
