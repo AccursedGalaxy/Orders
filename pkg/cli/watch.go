@@ -159,6 +159,20 @@ func formatFloat(f float64, decimals int) string {
 	return fmt.Sprintf(format, f)
 }
 
+// formatVolume formats volume with K/M/B suffixes
+func formatVolume(volume float64) string {
+	if volume >= 1_000_000_000 {
+		return fmt.Sprintf("%.2fB", volume/1_000_000_000)
+	}
+	if volume >= 1_000_000 {
+		return fmt.Sprintf("%.2fM", volume/1_000_000)
+	}
+	if volume >= 1_000 {
+		return fmt.Sprintf("%.2fK", volume/1_000)
+	}
+	return fmt.Sprintf("%.2f", volume)
+}
+
 func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, symbol string, m *symbolMetrics, cfg *config.Config) error {
 	// Get latest trade
 	trade, err := store.GetLatestTrade(ctx, symbol)
@@ -203,6 +217,7 @@ func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, sym
 	buyerMakerCount := 0
 	nonBuyerMakerCount := 0
 	var lastTrades []string
+	var totalQuantity float64
 
 	for _, t := range history {
 		p, err := strconv.ParseFloat(t.Data.Price, 64)
@@ -220,8 +235,10 @@ func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, sym
 			continue
 		}
 
-		volume := q          // Use quantity for volume
+		quoteVolume := p * q // Calculate quote volume (in USDT)
+		totalVolume += quoteVolume
 		volumePrice += p * q // For VWAP calculation
+		totalQuantity += q   // Track total quantity for VWAP
 
 		if p > m.high24h {
 			m.high24h = p
@@ -230,7 +247,6 @@ func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, sym
 			m.low24h = p
 		}
 
-		totalVolume += volume
 		// If IsBuyerMaker is true:
 		// - Buyer was the maker (placed a limit order)
 		// - Seller was the taker (placed a market order)
@@ -238,10 +254,10 @@ func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, sym
 		// - Seller was the maker (placed a limit order)
 		// - Buyer was the taker (placed a market order)
 		if t.Data.IsBuyerMaker {
-			sellVol += volume // Seller was the taker (market sell)
+			sellVol += quoteVolume // Seller was the taker (market sell)
 			buyerMakerCount++
 		} else {
-			buyVol += volume // Buyer was the taker (market buy)
+			buyVol += quoteVolume // Buyer was the taker (market buy)
 			nonBuyerMakerCount++
 		}
 		tradeCount++
@@ -277,8 +293,8 @@ func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, sym
 	}
 
 	// Calculate VWAP and trades per minute
-	if totalVolume > 0 {
-		m.vwap = volumePrice / totalVolume
+	if totalQuantity > 0 {
+		m.vwap = volumePrice / totalQuantity // VWAP = Σ(price * quantity) / Σ(quantity)
 	} else {
 		m.vwap = price
 	}
@@ -289,7 +305,7 @@ func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, sym
 		// Price action metrics
 		m.priceRange = ((m.high24h - m.low24h) / m.low24h) * 100
 		m.rangePosition = ((m.lastPrice - m.low24h) / (m.high24h - m.low24h)) * 100
-		m.vwapDev = ((m.lastPrice - m.vwap) / m.vwap) * 100
+		m.vwapDev = ((m.lastPrice - m.vwap) / m.vwap) * 100 // This calculation is correct, the input values were wrong
 
 		// Calculate volatility (standard deviation of returns)
 		var returns []float64
@@ -344,9 +360,9 @@ func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, sym
 	fmt.Println()
 
 	// Left column
-	fmt.Printf("Volume (24h):     %s\n", formatFloat(totalVolume, 4))
+	fmt.Printf("Volume (24h):     %s USDT\n", formatVolume(totalVolume))
 	fmt.Printf("Buy Volume:       %.1f%%\n", buyPercent)
-	fmt.Printf("Avg Trade Size:   %s\n", formatFloat(m.avgTradeSize, 4))
+	fmt.Printf("Avg Trade Size:   %s USDT\n", formatVolume(m.avgTradeSize))
 	fmt.Printf("Trades/min:       %.1f\n", m.tradesPerMin)
 
 	fmt.Println()
