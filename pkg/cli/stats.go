@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 func newStatsCmd() *cobra.Command {
 	var period string
 	var symbols []string
+	var debug bool
 
 	cmd := &cobra.Command{
 		Use:   "stats [symbols...]",
@@ -58,6 +60,11 @@ Example: binance-cli stats --period 1h BTCUSDT ETHUSDT`,
 				}
 			}
 
+			// Convert all symbols to uppercase
+			for i := range symbols {
+				symbols[i] = strings.ToUpper(symbols[i])
+			}
+
 			end := time.Now()
 			start := end.Add(-duration)
 
@@ -67,16 +74,28 @@ Example: binance-cli stats --period 1h BTCUSDT ETHUSDT`,
 				"Symbol", "Open", "High", "Low", "Close", "Volume", "Trades")
 			fmt.Println(strings.Repeat("-", 100))
 
+			noDataFound := true
 			for _, symbol := range symbols {
-				candles, err := postgresStore.GetHistoricalCandles(ctx, strings.ToLower(symbol), start, end)
+				if debug {
+					log.Printf("Fetching historical candles for %s from %s to %s", symbol, start.Format(time.RFC3339), end.Format(time.RFC3339))
+				}
+
+				candles, err := postgresStore.GetHistoricalCandles(ctx, symbol, start, end)
 				if err != nil {
-					fmt.Printf("Error getting data for %s: %v\n", symbol, err)
+					if debug {
+						log.Printf("Error getting data for %s: %v", symbol, err)
+					}
 					continue
 				}
 
 				if len(candles) == 0 {
+					if debug {
+						log.Printf("No data found for %s in the specified period", symbol)
+					}
 					continue
 				}
+
+				noDataFound = false
 
 				// Calculate aggregated statistics
 				first := candles[0]
@@ -87,6 +106,11 @@ Example: binance-cli stats --period 1h BTCUSDT ETHUSDT`,
 				trades := int64(0)
 
 				for _, candle := range candles {
+					if debug {
+						log.Printf("Processing candle: symbol=%s, time=%s, open=%s, close=%s, volume=%s, trades=%d",
+							symbol, candle.Timestamp.Format(time.RFC3339), candle.OpenPrice, candle.ClosePrice, candle.Volume, candle.TradeCount)
+					}
+
 					if candle.HighPrice > high {
 						high = candle.HighPrice
 					}
@@ -109,11 +133,16 @@ Example: binance-cli stats --period 1h BTCUSDT ETHUSDT`,
 				)
 			}
 
+			if noDataFound {
+				fmt.Printf("\nNo data found for any symbols in the last %s\n", period)
+			}
+
 			return nil
 		},
 	}
 
 	cmd.Flags().StringVarP(&period, "period", "p", "1h", "Time period (e.g., 1h, 24h, 7d)")
+	cmd.Flags().BoolVarP(&debug, "debug", "d", false, "Enable debug logging")
 	return cmd
 }
 

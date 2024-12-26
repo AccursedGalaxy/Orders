@@ -43,7 +43,7 @@ func newChartCmd() *cobra.Command {
 Example: binance-cli chart BTCUSDT --period 24h`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			symbol := strings.ToLower(args[0])
+			symbol := strings.ToUpper(args[0])
 
 			// Parse time period
 			duration, err := parseDuration(period)
@@ -71,7 +71,7 @@ Example: binance-cli chart BTCUSDT --period 24h`,
 					Symbol string
 					Period string
 				}{
-					Symbol: strings.ToUpper(symbol),
+					Symbol: symbol,
 					Period: period,
 				}
 				tmpl.Execute(w, data)
@@ -89,7 +89,7 @@ Example: binance-cli chart BTCUSDT --period 24h`,
 				}
 
 				data := ChartData{
-					Symbol: strings.ToUpper(symbol),
+					Symbol: symbol,
 					Time:   make([]string, len(candles)),
 					Open:   make([]string, len(candles)),
 					High:   make([]string, len(candles)),

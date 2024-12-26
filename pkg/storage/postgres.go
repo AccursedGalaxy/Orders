@@ -14,7 +14,8 @@ import (
 
 // PostgresStore handles historical trade data storage
 type PostgresStore struct {
-	db *sql.DB
+	db    *sql.DB
+	debug bool
 }
 
 // NewPostgresStore creates a new PostgreSQL store
@@ -45,7 +46,10 @@ func NewPostgresStore() (*PostgresStore, error) {
 	db.SetMaxIdleConns(5)
 	db.SetConnMaxLifetime(5 * time.Minute)
 
-	store := &PostgresStore{db: db}
+	store := &PostgresStore{
+		db:    db,
+		debug: os.Getenv("DEBUG") == "true",
+	}
 
 	// Create tables if they don't exist
 	if err := store.createTables(); err != nil {
@@ -137,50 +141,13 @@ func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, cand
 
 // GetHistoricalCandles retrieves historical candle data
 func (s *PostgresStore) GetHistoricalCandles(ctx context.Context, symbol string, start, end time.Time) ([]*models.Candle, error) {
-	log.Printf("Fetching historical candles for %s from %s to %s",
-		symbol, start.Format(time.RFC3339), end.Format(time.RFC3339))
-
-	// First, check if any data exists
-	var count int
-	err := s.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM trade_candles 
-		WHERE symbol = $1 AND timestamp BETWEEN $2 AND $3`,
-		symbol, start, end,
-	).Scan(&count)
-
-	if err != nil {
-		log.Printf("Error checking candle count: %v", err)
-	} else {
-		log.Printf("Found %d candles in the specified time range", count)
-	}
-
-	// Debug: Check all candles in the table
-	rows, err := s.db.QueryContext(ctx, `
-		SELECT symbol, timestamp, open_price, close_price, volume, trade_count
-		FROM trade_candles
-		ORDER BY timestamp DESC
-		LIMIT 5`,
-	)
-	if err != nil {
-		log.Printf("Error checking recent candles: %v", err)
-	} else {
-		defer rows.Close()
-		for rows.Next() {
-			var symbol string
-			var timestamp time.Time
-			var openPrice, closePrice, volume string
-			var tradeCount int64
-			if err := rows.Scan(&symbol, &timestamp, &openPrice, &closePrice, &volume, &tradeCount); err != nil {
-				log.Printf("Error scanning candle: %v", err)
-				continue
-			}
-			log.Printf("Found candle: symbol=%s, time=%s, open=%s, close=%s, volume=%s, trades=%d",
-				symbol, timestamp.Format(time.RFC3339), openPrice, closePrice, volume, tradeCount)
-		}
+	if s.debug {
+		log.Printf("Fetching historical candles for %s from %s to %s",
+			symbol, start.Format(time.RFC3339), end.Format(time.RFC3339))
 	}
 
 	// Get candles for the specified time range
-	rows, err = s.db.QueryContext(ctx, `
+	rows, err := s.db.QueryContext(ctx, `
 		SELECT timestamp, open_price, high_price, low_price, 
 			   close_price, volume, trade_count
 		FROM trade_candles
@@ -205,12 +172,18 @@ func (s *PostgresStore) GetHistoricalCandles(ctx context.Context, symbol string,
 			return nil, fmt.Errorf("failed to scan candle data: %w", err)
 		}
 		candles = append(candles, candle)
-		log.Printf("Retrieved candle for %s at %s: open=%s, close=%s, volume=%s",
-			symbol, candle.Timestamp.Format(time.RFC3339),
-			candle.OpenPrice, candle.ClosePrice, candle.Volume)
+
+		if s.debug {
+			log.Printf("Retrieved candle for %s at %s: open=%s, close=%s, volume=%s",
+				symbol, candle.Timestamp.Format(time.RFC3339),
+				candle.OpenPrice, candle.ClosePrice, candle.Volume)
+		}
 	}
 
-	log.Printf("Found %d historical candles for %s", len(candles), symbol)
+	if s.debug {
+		log.Printf("Found %d historical candles for %s", len(candles), symbol)
+	}
+
 	return candles, rows.Err()
 }
 

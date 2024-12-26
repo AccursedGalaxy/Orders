@@ -26,7 +26,7 @@ func newHistoryCmd() *cobra.Command {
 Example: binance-cli history BTCUSDT --period 24h --interval 5m`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			symbol := strings.ToLower(args[0])
+			symbol := strings.ToUpper(args[0])
 
 			// Parse time period
 			duration, err := parseDuration(period)
@@ -49,7 +49,7 @@ Example: binance-cli history BTCUSDT --period 24h --interval 5m`,
 			}
 
 			if len(candles) == 0 {
-				return fmt.Errorf("no data found for %s in the specified period", strings.ToUpper(symbol))
+				return fmt.Errorf("no data found for %s in the specified period", symbol)
 			}
 
 			// Limit the number of results if specified

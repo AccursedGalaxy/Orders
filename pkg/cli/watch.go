@@ -105,9 +105,9 @@ Example: binance-cli watch BTCUSDT ETHUSDT`,
 				}
 			}
 
-			// Convert symbols to lowercase
+			// Convert symbols to uppercase
 			for i := range symbols {
-				symbols[i] = strings.ToLower(symbols[i])
+				symbols[i] = strings.ToUpper(symbols[i])
 			}
 
 			if len(symbols) == 0 {
@@ -337,7 +337,7 @@ func updateAndDisplayMetrics(ctx context.Context, store *storage.RedisStore, sym
 
 	// Header with symbol and timestamp
 	fmt.Printf("─── %s %s%s %s ───\n",
-		strings.ToUpper(symbol),
+		symbol,
 		formatFloat(m.lastPrice, 2),
 		formatPriceChange(priceChange),
 		m.lastTradeTime.Format("15:04:05"))
@@ -423,7 +423,9 @@ func calculateStdDev(values []float64) float64 {
 	}
 	variance /= float64(len(values))
 
-	return math.Sqrt(variance)
+	// Annualize volatility (√252 for trading days per year)
+	// We multiply by 100 to convert to percentage
+	return math.Sqrt(variance) * math.Sqrt(252) * 100
 }
 
 func calculateVolumeMomentum(volumes []float64) float64 {
@@ -431,9 +433,32 @@ func calculateVolumeMomentum(volumes []float64) float64 {
 		return 0
 	}
 
-	// Simple momentum: ratio of recent volume to earlier volume
-	recentAvg := average(volumes[len(volumes)/2:])
-	earlierAvg := average(volumes[:len(volumes)/2])
+	// Use exponential weighting
+	const lambda = 0.94 // decay factor (higher = more weight to recent data)
+	var recentSum, recentWeight float64
+	var earlierSum, earlierWeight float64
+
+	midPoint := len(volumes) / 2
+
+	// Calculate weighted averages for recent and earlier periods
+	for i := len(volumes) - 1; i >= midPoint; i-- {
+		weight := math.Pow(lambda, float64(len(volumes)-1-i))
+		recentSum += volumes[i] * weight
+		recentWeight += weight
+	}
+
+	for i := midPoint - 1; i >= 0; i-- {
+		weight := math.Pow(lambda, float64(midPoint-1-i))
+		earlierSum += volumes[i] * weight
+		earlierWeight += weight
+	}
+
+	if earlierWeight == 0 || recentWeight == 0 {
+		return 0
+	}
+
+	recentAvg := recentSum / recentWeight
+	earlierAvg := earlierSum / earlierWeight
 
 	if earlierAvg == 0 {
 		return 0
@@ -447,15 +472,38 @@ func calculateTradeAcceleration(trades []float64) float64 {
 		return 0
 	}
 
-	// Calculate rate of change in trade frequency
-	recent := average(trades[len(trades)/2:])
-	earlier := average(trades[:len(trades)/2])
+	// Use exponential weighting
+	const lambda = 0.94 // decay factor (higher = more weight to recent data)
+	var recentSum, recentWeight float64
+	var earlierSum, earlierWeight float64
 
-	if earlier == 0 {
+	midPoint := len(trades) / 2
+
+	// Calculate weighted averages for recent and earlier periods
+	for i := len(trades) - 1; i >= midPoint; i-- {
+		weight := math.Pow(lambda, float64(len(trades)-1-i))
+		recentSum += trades[i] * weight
+		recentWeight += weight
+	}
+
+	for i := midPoint - 1; i >= 0; i-- {
+		weight := math.Pow(lambda, float64(midPoint-1-i))
+		earlierSum += trades[i] * weight
+		earlierWeight += weight
+	}
+
+	if earlierWeight == 0 || recentWeight == 0 {
 		return 0
 	}
 
-	return (recent - earlier) / earlier * 100
+	recentAvg := recentSum / recentWeight
+	earlierAvg := earlierSum / earlierWeight
+
+	if earlierAvg == 0 {
+		return 0
+	}
+
+	return (recentAvg - earlierAvg) / earlierAvg * 100
 }
 
 func average(values []float64) float64 {
