@@ -142,9 +142,9 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 	}
 
 	for _, symbol := range symbols {
-		// Get trades older than 2 hours
-		end := time.Now().Add(-2 * time.Hour)
-		start := end.Add(-22 * time.Hour) // Get the previous 22 hours of data
+		// Get trades older than 24 hours for migration to PostgreSQL
+		end := time.Now().Add(-24 * time.Hour)
+		start := end.Add(-24 * time.Hour) // Get the previous 24 hours of data for migration
 
 		trades, err := a.redisStore.GetTradeHistory(ctx, symbol, start, end)
 		if err != nil {

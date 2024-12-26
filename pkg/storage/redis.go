@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ type TradeStore interface {
 	GetLatestTrade(ctx context.Context, symbol string) (*models.Trade, error)
 	GetRedisClient() *redis.Client
 	Close() error
+	Update24hVolume(ctx context.Context, symbol string) error
 }
 
 // RedisStore handles Redis storage operations
@@ -133,6 +135,15 @@ func (s *RedisStore) StoreTrade(ctx context.Context, trade *models.Trade) error 
 			log.Printf("Warning: failed to trim history: %v", err)
 		}
 	}
+
+	// Update 24h volume (do this asynchronously to not block the trade storage)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.Update24hVolume(ctx, trade.Symbol); err != nil && s.config.Debug {
+			log.Printf("Warning: failed to update 24h volume for %s: %v", trade.Symbol, err)
+		}
+	}()
 
 	return nil
 }
@@ -287,4 +298,39 @@ func (s *RedisStore) GetTradeHistory(ctx context.Context, symbol string, start, 
 		log.Printf("Successfully parsed %d trades for %s", len(events), symbol)
 	}
 	return events, nil
+}
+
+// Update24hVolume calculates and stores the 24-hour volume for a symbol
+func (s *RedisStore) Update24hVolume(ctx context.Context, symbol string) error {
+	// Get trades from the last 24 hours
+	end := time.Now()
+	start := end.Add(-24 * time.Hour)
+
+	trades, err := s.GetTradeHistory(ctx, symbol, start, end)
+	if err != nil {
+		return fmt.Errorf("failed to get trade history: %w", err)
+	}
+
+	// Calculate total volume
+	var totalVolume float64
+	for _, trade := range trades {
+		quantity, err := strconv.ParseFloat(trade.Data.Quantity, 64)
+		if err != nil {
+			continue
+		}
+		price, err := strconv.ParseFloat(trade.Data.Price, 64)
+		if err != nil {
+			continue
+		}
+		totalVolume += quantity * price
+	}
+
+	// Store the volume with 1-hour expiry (to ensure regular updates)
+	volumeKey := fmt.Sprintf("%s%s:volume:24h", s.config.Redis.KeyPrefix, strings.ToUpper(symbol))
+	err = s.client.Set(ctx, volumeKey, fmt.Sprintf("%.2f", totalVolume), 1*time.Hour).Err()
+	if err != nil {
+		return fmt.Errorf("failed to store 24h volume: %w", err)
+	}
+
+	return nil
 }
