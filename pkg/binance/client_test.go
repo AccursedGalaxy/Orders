@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -178,7 +179,12 @@ func TestGetSymbols(t *testing.T) {
 	expectedSymbols := []string{"btcusdt", "ethusdt"}
 	if len(symbols) != len(expectedSymbols) {
 		t.Errorf("Expected %d symbols, got %d", len(expectedSymbols), len(symbols))
+		return
 	}
+
+	// Sort both slices to ensure consistent comparison
+	sort.Strings(symbols)
+	sort.Strings(expectedSymbols)
 
 	for i, symbol := range symbols {
 		if symbol != expectedSymbols[i] {

@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-22.04
+    if: '!contains(github.event.head_commit.message, ''chore(release)'')'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.21'
+          check-latest: true
+          cache: true
+
+      - name: Install dependencies
+        run: go mod download
+
+      - name: Determine version bump
+        id: bump
+        run: |
+          COMMIT_MSG=$(git log -1 --pretty=%B)
+          if echo "$COMMIT_MSG" | grep -q "^BREAKING CHANGE"; then
+            echo "type=major" >> $GITHUB_OUTPUT
+          elif echo "$COMMIT_MSG" | grep -q "^feat"; then
+            echo "type=minor" >> $GITHUB_OUTPUT
+          else
+            echo "type=patch" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump version
+        run: |
+          go run cmd/version/main.go -bump ${{ steps.bump.outputs.type }}
+          VERSION=$(jq -r .version project.json)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Build binaries
+        run: |
+          mkdir -p bin
+          GOOS=linux GOARCH=amd64 go build -v -o bin/streamer-linux-amd64 cmd/streamer/main.go
+          GOOS=linux GOARCH=amd64 go build -v -o bin/redis-viewer-linux-amd64 scripts/redis-viewer.go
+          GOOS=darwin GOARCH=amd64 go build -v -o bin/streamer-darwin-amd64 cmd/streamer/main.go
+          GOOS=darwin GOARCH=amd64 go build -v -o bin/redis-viewer-darwin-amd64 scripts/redis-viewer.go
+
+      - name: Create archives
+        run: |
+          cd bin
+          tar czf binance-redis-streamer-linux-amd64.tar.gz streamer-linux-amd64 redis-viewer-linux-amd64
+          tar czf binance-redis-streamer-darwin-amd64.tar.gz streamer-darwin-amd64 redis-viewer-darwin-amd64
+
+      - name: Generate changelog
+        id: changelog
+        uses: TriPSs/conventional-changelog-action@v3
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          version-file: './project.json'
+          version-path: 'version'
+          git-message: 'chore(release): {version}'
+          output-file: 'CHANGELOG.md'
+          skip-version-file: true
+          skip-commit: true
+
+      - name: Commit changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add project.json CHANGELOG.md
+          git commit -m "chore(release): v${{ env.VERSION }}"
+          git tag -a "v${{ env.VERSION }}" -m "Release v${{ env.VERSION }}"
+          git push
+          git push --tags
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Release v${{ env.VERSION }}
+          tag_name: v${{ env.VERSION }}
+          body_path: CHANGELOG.md
+          files: |
+            bin/binance-redis-streamer-linux-amd64.tar.gz
+            bin/binance-redis-streamer-darwin-amd64.tar.gz
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} 
