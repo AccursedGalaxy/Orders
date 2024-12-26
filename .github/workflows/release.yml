@@ -8,7 +8,6 @@ jobs:
   release:
     name: Test, Build & Release
     runs-on: ubuntu-22.04
-    # Skip if it's a release commit
     if: '!contains(github.event.head_commit.message, ''chore(release)'')'
     permissions:
       contents: write
@@ -71,14 +70,21 @@ jobs:
           file: ./coverage.txt
           fail_ci_if_error: true
 
+      - name: Configure Git
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Action"
+
       - name: Prepare version
         id: version
         run: |
+          # Ensure we're on the main branch
+          git checkout main
+          
           # Get the latest version from git tags
           git fetch --tags --force
           LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
           LATEST_VERSION=${LATEST_TAG#v}
-          CURRENT_VERSION=$(jq -r .version project.json)
           
           # Calculate new version
           NEW_VERSION=$(echo $LATEST_VERSION | awk -F. '{$NF = $NF + 1;} 1' | sed 's/ /./g')
@@ -86,11 +92,13 @@ jobs:
           echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
           # Update project.json with new version
-          jq ".version = \"$NEW_VERSION\"" project.json > project.json.tmp && mv project.json.tmp project.json
+          if [ -f project.json ]; then
+            jq ".version = \"$NEW_VERSION\"" project.json > project.json.tmp && mv project.json.tmp project.json
+          else
+            echo "{\"version\": \"$NEW_VERSION\"}" > project.json
+          fi
           
-          # Create release branch
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          # Create and switch to release branch
           git checkout -b release/v$NEW_VERSION
 
       - name: Generate changelog
@@ -100,13 +108,16 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           version-file: './project.json'
           version-path: 'version'
-          git-message: 'chore(release): {version} [skip ci]'
+          git-message: 'chore(release): {version}'
           output-file: 'CHANGELOG.md'
           skip-version-file: false
           skip-commit: false
           skip-on-empty: false
           git-branch: release/v${{ env.NEW_VERSION }}
           fallback-version: ${{ env.NEW_VERSION }}
+          preset: 'angular'
+          tag-prefix: 'v'
+          release-count: 0
 
       - name: Build binaries
         run: |
@@ -129,7 +140,7 @@ jobs:
         uses: peter-evans/create-pull-request@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          commit-message: "chore(release): v${{ env.NEW_VERSION }} [skip ci]"
+          commit-message: "chore(release): v${{ env.NEW_VERSION }}"
           title: "chore(release): v${{ env.NEW_VERSION }}"
           body: |
             Release version ${{ env.NEW_VERSION }}
