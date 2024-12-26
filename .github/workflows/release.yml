@@ -98,6 +98,11 @@ jobs:
           echo "NEW_VERSION=$NEW_VERSION" >> $GITHUB_ENV
           echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
           
+          # Make sure we're on a clean state
+          git fetch origin
+          git checkout main
+          git reset --hard origin/main
+          
           # Create a release branch
           git checkout -b release/v$NEW_VERSION
           
@@ -112,7 +117,7 @@ jobs:
         id: changelog
         uses: TriPSs/conventional-changelog-action@v3
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PAT_TOKEN }}
           version-file: './project.json'
           version-path: 'version'
           git-message: 'chore(release): {version}'
@@ -131,6 +136,8 @@ jobs:
         run: |
           git add CHANGELOG.md
           git commit --amend --no-edit
+          # Force push since we amended the commit
+          git push -f origin release/v${{ env.NEW_VERSION }}
 
       - name: Build binaries
         run: |
