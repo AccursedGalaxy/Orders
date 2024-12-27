@@ -109,8 +109,8 @@ func (s *PostgresStore) createTables() error {
 // StoreCandleData stores 1-minute aggregated trade data
 func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, candle *models.Candle) error {
 	if s.debug {
-		log.Printf("Storing candle data for %s at %s: open=%s, high=%s, low=%s, close=%s, volume=%s, trades=%d",
-			symbol, candle.Timestamp.Format(time.RFC3339),
+		log.Printf("[DEBUG] Attempting to store candle data for %s at %s", symbol, candle.Timestamp.Format(time.RFC3339))
+		log.Printf("[DEBUG] Candle data: open=%s, high=%s, low=%s, close=%s, volume=%s, trades=%d",
 			candle.OpenPrice, candle.HighPrice, candle.LowPrice, candle.ClosePrice,
 			candle.Volume, candle.TradeCount)
 	}
@@ -122,7 +122,7 @@ func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, cand
 	}
 
 	if s.debug {
-		log.Printf("Using UTC timestamp: %s for candle data", timestamp.Format(time.RFC3339))
+		log.Printf("[DEBUG] Using UTC timestamp: %s for candle data", timestamp.Format(time.RFC3339))
 	}
 
 	result, err := s.db.ExecContext(ctx, `
@@ -136,40 +136,23 @@ func (s *PostgresStore) StoreCandleData(ctx context.Context, symbol string, cand
 			low_price = LEAST(trade_candles.low_price, EXCLUDED.low_price),
 			close_price = EXCLUDED.close_price,
 			volume = trade_candles.volume + EXCLUDED.volume,
-			trade_count = trade_candles.trade_count + EXCLUDED.trade_count`,
+			trade_count = trade_candles.trade_count + EXCLUDED.trade_count
+		RETURNING (xmax = 0) as inserted`,
 		symbol, timestamp, candle.OpenPrice,
 		candle.HighPrice, candle.LowPrice, candle.ClosePrice,
 		candle.Volume, candle.TradeCount,
 	)
 
 	if err != nil {
+		if s.debug {
+			log.Printf("[ERROR] Failed to store candle data: %v", err)
+		}
 		return fmt.Errorf("failed to store candle data: %w", err)
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		if s.debug {
-			log.Printf("Warning: couldn't get rows affected: %v", err)
-		}
-	} else if s.debug {
-		log.Printf("Stored candle data for %s at %s: %d rows affected",
-			symbol, timestamp.Format(time.RFC3339), rowsAffected)
-	}
-
-	// Verify the data was stored
 	if s.debug {
-		var count int
-		err := s.db.QueryRowContext(ctx, `
-			SELECT COUNT(*) FROM trade_candles 
-			WHERE symbol = $1 AND timestamp = $2`,
-			symbol, timestamp,
-		).Scan(&count)
-		if err != nil {
-			log.Printf("Warning: failed to verify stored data: %v", err)
-		} else {
-			log.Printf("Verified candle data for %s at %s: found %d records",
-				symbol, timestamp.Format(time.RFC3339), count)
-		}
+		rowsAffected, _ := result.RowsAffected()
+		log.Printf("[DEBUG] Successfully stored candle data. Rows affected: %d", rowsAffected)
 	}
 
 	return nil
@@ -256,23 +239,44 @@ func (s *PostgresStore) GetHistoricalCandles(ctx context.Context, symbol string,
 
 // GetAggregatedCandles retrieves candles with custom time buckets
 func (s *PostgresStore) GetAggregatedCandles(ctx context.Context, symbol string, start, end time.Time, interval string) ([]*models.Candle, error) {
+	// Convert interval string to PostgreSQL interval (e.g., '1m' to 'minute')
+	pgInterval := "minute"
+	if strings.HasSuffix(interval, "m") {
+		if val := strings.TrimSuffix(interval, "m"); val != "1" {
+			pgInterval = fmt.Sprintf("%s minutes", val)
+		}
+	} else if strings.HasSuffix(interval, "h") {
+		if val := strings.TrimSuffix(interval, "h"); val == "1" {
+			pgInterval = "hour"
+		} else {
+			pgInterval = fmt.Sprintf("%s hours", val)
+		}
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Converting interval %s to PostgreSQL interval: %s", interval, pgInterval)
+	}
+
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT 
-			time_bucket($4, timestamp) as bucket,
-			first(open_price, timestamp) as open_price,
-			max(high_price) as high_price,
-			min(low_price) as low_price,
-			last(close_price, timestamp) as close_price,
-			sum(volume) as volume,
-			sum(trade_count) as trade_count
+			date_trunc($4, timestamp) as bucket,
+			FIRST_VALUE(open_price) OVER (PARTITION BY date_trunc($4, timestamp) ORDER BY timestamp) as open_price,
+			MAX(high_price) as high_price,
+			MIN(low_price) as low_price,
+			LAST_VALUE(close_price) OVER (PARTITION BY date_trunc($4, timestamp) ORDER BY timestamp) as close_price,
+			SUM(volume) as volume,
+			SUM(trade_count) as trade_count
 		FROM trade_candles
 		WHERE symbol = $1 AND timestamp BETWEEN $2 AND $3
-		GROUP BY bucket
+		GROUP BY bucket, open_price, close_price
 		ORDER BY bucket ASC`,
-		symbol, start, end, interval, // interval can be '5 minutes', '1 hour', etc.
+		symbol, start, end, pgInterval,
 	)
 	if err != nil {
-		return nil, err
+		if s.debug {
+			log.Printf("[ERROR] Failed to query aggregated candles: %v", err)
+		}
+		return nil, fmt.Errorf("failed to query aggregated candles: %w", err)
 	}
 	defer rows.Close()
 
@@ -287,9 +291,22 @@ func (s *PostgresStore) GetAggregatedCandles(ctx context.Context, symbol string,
 			&candle.TradeCount,
 		)
 		if err != nil {
-			return nil, err
+			if s.debug {
+				log.Printf("[ERROR] Failed to scan candle data: %v", err)
+			}
+			return nil, fmt.Errorf("failed to scan candle data: %w", err)
 		}
 		candles = append(candles, candle)
+
+		if s.debug {
+			log.Printf("[DEBUG] Retrieved aggregated candle for %s at %s: open=%s, close=%s, volume=%s",
+				symbol, candle.Timestamp.Format(time.RFC3339),
+				candle.OpenPrice, candle.ClosePrice, candle.Volume)
+		}
+	}
+
+	if s.debug {
+		log.Printf("[DEBUG] Found %d aggregated candles for %s", len(candles), symbol)
 	}
 
 	return candles, rows.Err()

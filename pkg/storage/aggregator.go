@@ -38,23 +38,22 @@ func (a *TradeAggregator) Start(ctx context.Context) {
 
 	log.Printf("Starting trade aggregator with 10-second flush interval")
 
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-a.stopCh:
-				return
-			case <-ticker.C:
-				if err := a.flushCandles(ctx); err != nil {
-					log.Printf("Error flushing candles: %v", err)
-				}
-			}
-		}
-	}()
-
 	// Start historical data migration
 	go a.migrateHistoricalData(ctx)
+
+	// Run the flush loop in the main goroutine
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-a.stopCh:
+			return
+		case <-ticker.C:
+			if err := a.flushCandles(ctx); err != nil {
+				log.Printf("Error flushing candles: %v", err)
+			}
+		}
+	}
 }
 
 // ProcessTrade processes a new trade and updates the current candle
@@ -91,33 +90,33 @@ func (a *TradeAggregator) flushCandles(ctx context.Context) error {
 	a.candleMu.Lock()
 	defer a.candleMu.Unlock()
 
-	log.Printf("Starting candle flush, current count: %d", len(a.candles))
-	currentMinute := time.Now().Truncate(time.Minute)
+	log.Printf("[DEBUG] Starting candle flush, current count: %d", len(a.candles))
+	currentMinute := time.Now().UTC().Truncate(time.Minute)
 	flushedCount := 0
 
 	for key, candle := range a.candles {
 		// Only flush candles that are complete (from previous minutes)
-		if candle.Timestamp.Before(currentMinute) {
+		if candle.Timestamp.UTC().Before(currentMinute) {
 			symbol := strings.Split(key, ":")[0]
-			log.Printf("Flushing candle for %s at %s: open=%s, high=%s, low=%s, close=%s, volume=%s, trades=%d",
+			log.Printf("[DEBUG] Attempting to flush candle for %s at %s: open=%s, high=%s, low=%s, close=%s, volume=%s, trades=%d",
 				symbol, candle.Timestamp.Format(time.RFC3339),
 				candle.OpenPrice, candle.HighPrice, candle.LowPrice, candle.ClosePrice,
 				candle.Volume, candle.TradeCount)
 
 			if err := a.postgresStore.StoreCandleData(ctx, symbol, candle); err != nil {
-				log.Printf("Failed to store candle data: %v", err)
+				log.Printf("[ERROR] Failed to store candle data: %v", err)
 				continue
 			}
 			delete(a.candles, key)
 			flushedCount++
-			log.Printf("Successfully flushed candle for %s at %s", symbol, candle.Timestamp.Format(time.RFC3339))
+			log.Printf("[DEBUG] Successfully flushed candle for %s at %s", symbol, candle.Timestamp.Format(time.RFC3339))
 		} else {
-			log.Printf("Skipping current candle for %s at %s (not complete yet)",
+			log.Printf("[DEBUG] Skipping current candle for %s at %s (not complete yet)",
 				strings.Split(key, ":")[0], candle.Timestamp.Format(time.RFC3339))
 		}
 	}
 
-	log.Printf("Flush complete: flushed %d candles, %d remaining in memory",
+	log.Printf("[DEBUG] Flush complete: flushed %d candles, %d remaining in memory",
 		flushedCount, len(a.candles))
 
 	return nil
@@ -144,6 +143,8 @@ func (a *TradeAggregator) migrateHistoricalData(ctx context.Context) {
 
 // performMigration performs the actual data migration
 func (a *TradeAggregator) performMigration(ctx context.Context) error {
+	log.Printf("[DEBUG] Starting historical data migration")
+
 	// Get symbols from Redis
 	symbolsKey := fmt.Sprintf("%ssymbols", a.redisStore.config.Redis.KeyPrefix)
 	symbols, err := a.redisStore.client.SMembers(ctx, symbolsKey).Result()
@@ -151,23 +152,28 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 		return fmt.Errorf("failed to get symbols: %w", err)
 	}
 
+	log.Printf("[DEBUG] Found %d symbols for migration", len(symbols))
+
 	for _, symbol := range symbols {
 		// Get trades older than 2 hours for migration to PostgreSQL
 		end := time.Now().Add(-2 * time.Hour)
 		start := end.Add(-22 * time.Hour) // Get the remaining 22 hours to complete 24h in PostgreSQL
 
+		log.Printf("[DEBUG] Fetching historical trades for %s from %s to %s",
+			symbol, start.Format(time.RFC3339), end.Format(time.RFC3339))
+
 		trades, err := a.redisStore.GetTradeHistory(ctx, symbol, start, end)
 		if err != nil {
-			log.Printf("Error getting trade history for %s: %v", symbol, err)
+			log.Printf("[ERROR] Error getting trade history for %s: %v", symbol, err)
 			continue
 		}
+
+		log.Printf("[DEBUG] Found %d historical trades for %s", len(trades), symbol)
 
 		// Group trades by minute
 		candleMap := make(map[time.Time]*models.Candle)
 		for _, trade := range trades {
-			// Convert milliseconds to time
 			tradeTime := time.UnixMilli(trade.Data.TradeTime).Truncate(time.Minute)
-
 			if candle, exists := candleMap[tradeTime]; exists {
 				candle.UpdateFromTrade(trade.Data.ToTrade())
 			} else {
@@ -177,18 +183,25 @@ func (a *TradeAggregator) performMigration(ctx context.Context) error {
 			}
 		}
 
+		log.Printf("[DEBUG] Created %d candles from historical trades for %s", len(candleMap), symbol)
+
 		// Store candles in PostgreSQL
+		storedCount := 0
 		for _, candle := range candleMap {
 			if err := a.postgresStore.StoreCandleData(ctx, symbol, candle); err != nil {
-				log.Printf("Error storing candle data for %s: %v", symbol, err)
+				log.Printf("[ERROR] Error storing historical candle data for %s: %v", symbol, err)
 				continue
 			}
+			storedCount++
 		}
+
+		log.Printf("[DEBUG] Successfully stored %d/%d historical candles for %s",
+			storedCount, len(candleMap), symbol)
 
 		// After successful migration, clean up Redis data older than retention period
 		if err := a.redisStore.trimHistory(ctx, fmt.Sprintf("%strade:%s:history",
 			a.redisStore.config.Redis.KeyPrefix, strings.ToUpper(symbol))); err != nil {
-			log.Printf("Warning: failed to trim Redis history for %s: %v", symbol, err)
+			log.Printf("[WARNING] Failed to trim Redis history for %s: %v", symbol, err)
 		}
 	}
 
